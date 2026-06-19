@@ -1,0 +1,55 @@
+{
+    "$schema": "https://www.schemastore.org/tsconfig.json",
+    "compilerOptions": {
+        "allowJs": false,
+        "allowSyntheticDefaultImports": true,
+        "alwaysStrict": true,
+        "checkJs": false,
+        "declaration": true,
+        "declarationMap": true,
+        "esModuleInterop": true,
+        "exactOptionalPropertyTypes": true,
+        "forceConsistentCasingInFileNames": true,
+        "isolatedDeclarations": false,
+        "isolatedModules": true,
+        "lib": [
+            "ES2024",
+            "DOM"
+        ],
+        "module": "NodeNext",
+        "moduleResolution": "NodeNext",
+        "newLine": "crlf",
+        "noEmit": true,
+        "noFallthroughCasesInSwitch": true,
+        "noImplicitAny": true,
+        "noImplicitOverride": true,
+        "noImplicitReturns": true,
+        "noImplicitThis": true,
+        "noPropertyAccessFromIndexSignature": true,
+        "noUncheckedIndexedAccess": true,
+        "noUnusedLocals": true,
+        "noUnusedParameters": true,
+        "resolveJsonModule": true,
+        "skipLibCheck": true,
+        "sourceMap": true,
+        "strict": true,
+        "target": "ES2024",
+        "types": [
+            "node",
+            "vitest/globals"
+        ],
+        "verbatimModuleSyntax": true
+    },
+    "exclude": [
+        ".cache/**",
+        "coverage/**",
+        "dist/**",
+        "node_modules/**",
+        "test/fixtures/**"
+    ],
+    "include": [
+        "src/**/*.ts",
+        "test/**/*.ts",
+        "vitest.config.ts"
+    ]
+}

@@ -1,0 +1,71 @@
+# yaml-language-server: $schema=https://www.schemastore.org/codecov.json
+
+codecov:
+    branch: "main"
+    max_report_age: "24h"
+    notify:
+        wait_for_ci: true
+    require_ci_to_pass: true
+    slug: "Nick2bad4u/remark-lint-frontmatter-validation"
+
+comment:
+    behavior: "default"
+    layout: "header, diff, flags, files, footer"
+    require_base: false
+    require_changes: false
+    require_head: true
+
+component_management:
+    default_rules:
+        statuses:
+            - target: "auto"
+              threshold: "2%"
+              type: "project"
+    individual_components:
+        - component_id: "package_entry"
+          name: "Package source"
+          paths:
+              - "src/plugin.ts"
+              - "src/validate.ts"
+              - "src/schema.ts"
+
+coverage:
+    precision: 2
+    range: "60...100"
+    round: "down"
+    status:
+        patch:
+            default:
+                target: "80%"
+                threshold: "2%"
+        project:
+            default:
+                target: "auto"
+                threshold: "2%"
+
+flags:
+    os-linux:
+        carryforward: true
+        paths:
+            - "src/"
+
+    os-macos:
+        carryforward: true
+        paths:
+            - "src/"
+
+    os-windows:
+        carryforward: true
+        paths:
+            - "src/"
+
+ignore:
+    - "benchmarks/**"
+    - "coverage/**"
+    - "dist/**"
+    - "docs/**"
+    - "scripts/**"
+    - "test/**"
+    - "**/*.d.ts"
+    - "**/*.test.*"
+    - "**/*.spec.*"
