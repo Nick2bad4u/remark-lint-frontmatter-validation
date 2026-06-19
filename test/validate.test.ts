@@ -12,6 +12,7 @@ import remarkLintFrontmatterValidation from "../src/plugin.js";
 import { validateMarkdown } from "../src/validate.js";
 
 const execFileAsync = promisify(execFile);
+const fixtureRoot = path.resolve("test", "fixtures");
 
 interface FailedCommand {
     readonly code: number | undefined;
@@ -220,6 +221,85 @@ describe(validateMarkdown, () => {
 });
 
 describe("remark plugin", () => {
+    it("validates Markdown fixture files through remark-lint", async () => {
+        const schema = "./schemas/article.schema.json";
+        const pluginOptions = {
+            cwd: fixtureRoot,
+            schemas: {
+                [schema]: ["content/**/*.{markdown,md,mdx}"],
+            },
+        };
+        const processFixture = async (fixturePath: string) =>
+            remark()
+                .use(remarkFrontmatter, ["yaml", "toml"])
+                .use(remarkLintFrontmatterValidation, pluginOptions)
+                .process({
+                    path: path.join(fixtureRoot, fixturePath),
+                    value: await readFile(
+                        path.join(fixtureRoot, fixturePath),
+                        "utf8"
+                    ),
+                });
+
+        const validYaml = await processFixture("content/valid-yaml.md");
+        const validToml = await processFixture("content/valid-toml.markdown");
+        const invalidYaml = await processFixture("content/invalid-yaml.md");
+        const invalidToml = await processFixture(
+            "content/invalid-toml.markdown"
+        );
+
+        expect(validYaml.messages).toStrictEqual([]);
+        expect(validToml.messages).toStrictEqual([]);
+        expect(invalidYaml.messages).toHaveLength(3);
+        expect(invalidYaml.messages.map((message) => message.ruleId)).toEqual([
+            "frontmatter-validation",
+            "frontmatter-validation",
+            "frontmatter-validation",
+        ]);
+        expect(
+            invalidYaml.messages
+                .map((message) => message.line)
+                .toSorted((left, right) => (left ?? 0) - (right ?? 0))
+        ).toStrictEqual([
+            2,
+            3,
+            4,
+        ]);
+        expect(
+            invalidYaml.messages
+                .map((message) => message.reason)
+                .toSorted((left, right) => left.localeCompare(right))
+        ).toStrictEqual([
+            expect.stringContaining("/draft: Must be boolean"),
+            expect.stringContaining("/tags: Must NOT have fewer than 1 items"),
+            expect.stringContaining("/title: Must be string"),
+        ]);
+        expect(invalidToml.messages).toHaveLength(3);
+        expect(invalidToml.messages.map((message) => message.ruleId)).toEqual([
+            "frontmatter-validation",
+            "frontmatter-validation",
+            "frontmatter-validation",
+        ]);
+        expect(
+            invalidToml.messages
+                .map((message) => message.line)
+                .toSorted((left, right) => (left ?? 0) - (right ?? 0))
+        ).toStrictEqual([
+            2,
+            3,
+            4,
+        ]);
+        expect(
+            invalidToml.messages
+                .map((message) => message.reason)
+                .toSorted((left, right) => left.localeCompare(right))
+        ).toStrictEqual([
+            expect.stringContaining("/draft: Must be boolean"),
+            expect.stringContaining("/tags: Must NOT have fewer than 1 items"),
+            expect.stringContaining("/title: Must be string"),
+        ]);
+    });
+
     it("reports findings through remark-lint messages", async () => {
         const file = await remark()
             .use(remarkFrontmatter, ["yaml", "toml"])
