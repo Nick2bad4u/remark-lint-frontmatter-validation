@@ -138,6 +138,7 @@ const isCiEnvironment = process.env["CI"] === "true",
                     "scripts/**",
                     "shared",
                     "shared/test",
+                    "src/cli.ts", // CLI behavior is covered through spawned dist/cli.js integration tests.
                     "src/**/baseTypes.ts", // Exclude interface-only files that contain only TypeScript interfaces
                     "src/**/types.ts", // Exclude type definition files only in src directory
                     "src/test/**",
@@ -161,11 +162,9 @@ const isCiEnvironment = process.env["CI"] === "true",
                 reportOnFailure: true,
                 reportsDirectory: "./coverage",
                 skipFull: true, // Keep human-readable coverage output focused on files with gaps.
-                // NOTE: Coverage thresholds adjusted after empirical analysis of current
-                // instrumentation (November 2025). JSX-heavy components and patched CSS
-                // modules generate synthetic branches that Vitest counts but cannot be
-                // exercised in runtime. The revised values enforce strong coverage for
-                // executable logic without blocking on non-actionable gaps.
+                // Keep thresholds focused on the library/plugin modules. CLI behavior is
+                // covered by spawned-process tests because V8 cannot attribute that child
+                // process execution to the Vitest process.
                 thresholds: {
                     // Auto-update requires Vitest to rewrite the originating config file.
                     // Our configuration is generated dynamically via defineConfig callbacks,

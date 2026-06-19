@@ -1,14 +1,34 @@
+#!/usr/bin/env node
+
+import type { ArrayValues } from "type-fest";
+
 import { readFile, stat } from "node:fs/promises";
 import * as path from "node:path";
 import { pathToFileURL } from "node:url";
 import { glob } from "tinyglobby";
+import {
+    arrayConcat,
+    arrayIncludes,
+    arrayJoin,
+    isDefined,
+    isEmpty,
+    objectHasOwn,
+    stringSplit,
+} from "ts-extras";
 
-import type { RemoteSchemaOptions, Settings, ValidationResult } from "./types.js";
+import type {
+    RemoteSchemaOptions,
+    Settings,
+    ValidationResult,
+} from "./types.js";
 
 import { validateMarkdown } from "./validate.js";
 
 interface CliOptions {
     readonly allowInFileUrls: boolean;
+    readonly cache: boolean | undefined;
+    readonly cacheDirectory: string | undefined;
+    readonly cacheTtlMs: number | undefined;
     readonly config: string | undefined;
     readonly cwd: string;
     readonly extensions: readonly string[] | undefined;
@@ -24,44 +44,115 @@ interface CliOptions {
     readonly timeoutMs: number | undefined;
 }
 
-function buildSettings(options: CliOptions, config: Settings): Settings {
-    const mapSchemas = schemaMapEntries(options.schemaMaps);
-    const schemas = {
-        ...config.schemas,
-        ...mapSchemas,
-    };
+interface MutableCliOptions {
+    allowInFileUrls: boolean;
+    cache: boolean | undefined;
+    cacheDirectory: string | undefined;
+    cacheTtlMs: number | undefined;
+    config: string | undefined;
+    cwd: string;
+    extensions: string[] | undefined;
+    files: string[];
+    format: CliOptions["format"];
+    frontmatter: ("toml" | "yaml")[] | undefined;
+    remoteRefs: CliOptions["remoteRefs"];
+    requireFrontmatter: boolean;
+    requireSchema: boolean;
+    schema: string | undefined;
+    schemaKey: string | undefined;
+    schemaMaps: string[];
+    timeoutMs: number | undefined;
+}
 
-    if (options.schema) {
-        schemas[options.schema] = ["**/*"];
-    }
+interface ParsedArgument {
+    readonly nextIndex: number;
+}
 
-    const remote = {
-        ...config,
-    };
+const outputFormats = [
+    "github",
+    "json",
+    "stylish",
+] as const;
+const remoteRefModes = [
+    "all",
+    "none",
+    "same-origin",
+] as const;
+
+interface ResolvedInputPattern {
+    readonly kind: "file" | "glob";
+    readonly value: string;
+}
+
+function buildRemoteSettings(
+    options: CliOptions,
+    config: Settings
+): RemoteSchemaOptions {
     const timeoutMs = options.timeoutMs ?? config.remote?.timeoutMs;
-    const remoteSettings: RemoteSchemaOptions = {
+
+    return {
         ...config.remote,
-        allowInFileUrls: options.allowInFileUrls || config.remote?.allowInFileUrls || false,
+        allowInFileUrls: options.allowInFileUrls
+            ? true
+            : (config.remote?.allowInFileUrls ?? false),
+        cache: {
+            ...config.remote?.cache,
+            ...(isDefined(options.cache) && { enabled: options.cache }),
+            ...(isDefined(options.cacheDirectory) && {
+                directory: options.cacheDirectory,
+            }),
+            ...(isDefined(options.cacheTtlMs) && { ttlMs: options.cacheTtlMs }),
+        },
         refs: options.remoteRefs,
-        ...(timeoutMs !== undefined && { timeoutMs }),
+        ...(isDefined(timeoutMs) && { timeoutMs }),
     };
+}
+
+function buildSettings(options: CliOptions, config: Settings): Settings {
+    const schemas = mergeSchemaSettings(options, config);
+    const remoteSettings = buildRemoteSettings(options, config);
     const schemaKey = options.schemaKey ?? config.schemaKey;
 
     return {
-        ...remote,
+        ...config,
         cwd: options.cwd,
         remote: remoteSettings,
-        requireFrontmatter:
-            options.requireFrontmatter || config.requireFrontmatter || false,
-        requireSchema: options.requireSchema || config.requireSchema || false,
+        requireFrontmatter: options.requireFrontmatter
+            ? true
+            : (config.requireFrontmatter ?? false),
+        requireSchema: options.requireSchema
+            ? true
+            : (config.requireSchema ?? false),
         schemas,
-        ...((options.extensions ?? config.extensions) && {
+        ...(isDefined(options.extensions ?? config.extensions) && {
             extensions: options.extensions ?? config.extensions,
         }),
-        ...((options.frontmatter ?? config.frontmatter) && {
+        ...(isDefined(options.frontmatter ?? config.frontmatter) && {
             frontmatter: options.frontmatter ?? config.frontmatter,
         }),
-        ...(schemaKey && { schemaKey }),
+        ...(isDefined(schemaKey) && { schemaKey }),
+    };
+}
+
+function defaultCliOptions(): MutableCliOptions {
+    return {
+        allowInFileUrls: false,
+        cache: undefined,
+        cacheDirectory: undefined,
+        cacheTtlMs: undefined,
+        config: undefined,
+        cwd: process.cwd(),
+        extensions: undefined,
+        files: [],
+        format: "stylish",
+        frontmatter: undefined,
+        remoteRefs: false,
+        requireFrontmatter: false,
+        requireSchema: false,
+        schema: undefined,
+        schemaKey: undefined,
+        schemaMaps: [],
+        timeoutMs: undefined,
     };
 }
 
@@ -74,26 +165,23 @@ function escapeGitHubMessage(message: string): string {
         .replaceAll(",", "%2C");
 }
 
-async function findFiles(patterns: readonly string[], cwd: string): Promise<string[]> {
-    if (patterns.length === 0) {
+async function findFiles(
+    patterns: readonly string[],
+    cwd: string
+): Promise<string[]> {
+    if (isEmpty(patterns)) {
         throw new Error("At least one file or glob is required.");
     }
 
-    const absoluteFiles: string[] = [];
-    const globPatterns: string[] = [];
-
-    for (const pattern of patterns) {
-        if (path.isAbsolute(pattern)) {
-            const stats = await stat(pattern).catch(() => undefined);
-
-            if (stats?.isFile()) {
-                absoluteFiles.push(pattern);
-                continue;
-            }
-        }
-
-        globPatterns.push(pattern);
-    }
+    const resolvedPatterns = await Promise.all(
+        patterns.map(async (pattern) => resolveInputPattern(pattern))
+    );
+    const absoluteFiles = resolvedPatterns
+        .filter((entry) => entry.kind === "file")
+        .map((entry) => entry.value);
+    const globPatterns = resolvedPatterns
+        .filter((entry) => entry.kind === "glob")
+        .map((entry) => entry.value);
 
     const matches = await glob(globPatterns, {
         absolute: true,
@@ -102,20 +190,32 @@ async function findFiles(patterns: readonly string[], cwd: string): Promise<stri
         onlyFiles: true,
     });
 
-    return [...new Set([...absoluteFiles, ...matches])].sort();
+    return [...new Set(arrayConcat(absoluteFiles, matches))];
+}
+
+function isOutputFormat(value: string): value is CliOptions["format"] {
+    return arrayIncludes(outputFormats, value);
+}
+
+function isRemoteRefMode(
+    value: string
+): value is ArrayValues<typeof remoteRefModes> {
+    return arrayIncludes(remoteRefModes, value);
+}
+
+function isSettings(value: unknown): value is Settings {
+    return typeof value === "object" && value !== null;
 }
 
 async function loadConfig(configPath: string | undefined): Promise<Settings> {
-    if (!configPath) {
+    if (!isDefined(configPath)) {
         return {};
     }
 
     const resolved = path.resolve(configPath);
-    const imported = (await import(pathToFileURL(resolved).href)) as Settings & {
-        readonly default?: Settings;
-    };
+    const imported: unknown = await import(pathToFileURL(resolved).href);
 
-    return imported.default ?? imported;
+    return settingsFromModule(imported);
 }
 
 async function main(): Promise<number> {
@@ -138,132 +238,179 @@ async function main(): Promise<number> {
     }
 }
 
-function parseArgs(args: string[]): CliOptions {
-    const files: string[] = [];
-    const schemaMaps: string[] = [];
-    let allowInFileUrls = false;
-    let config: string | undefined;
-    let cwd = process.cwd();
-    let extensions: string[] | undefined;
-    let format: CliOptions["format"] = "stylish";
-    let frontmatter: ("toml" | "yaml")[] | undefined;
-    let remoteRefs: CliOptions["remoteRefs"] = false;
-    let requireFrontmatter = false;
-    let requireSchema = false;
-    let schema: string | undefined;
-    let schemaKey: string | undefined;
-    let timeoutMs: number | undefined;
+function mergeSchemaSettings(
+    options: CliOptions,
+    config: Settings
+): Record<string, readonly string[]> {
+    const schemas: Record<string, readonly string[]> = {
+        ...config.schemas,
+        ...schemaMapEntries(options.schemaMaps),
+    };
 
-    for (let index = 0; index < args.length; index += 1) {
-        const arg = args[index];
-
-        switch (arg) {
-            case "--allow-in-file-urls": {
-                allowInFileUrls = true;
-                break;
-            }
-            case "--config": {
-                config = takeValue(args, index, arg);
-                index += 1;
-                break;
-            }
-            case "--cwd": {
-                cwd = path.resolve(takeValue(args, index, arg));
-                index += 1;
-                break;
-            }
-            case "--extensions": {
-                extensions = takeValue(args, index, arg)
-                    .split(",")
-                    .map((value: string) => value.trim())
-                    .filter(Boolean);
-                index += 1;
-                break;
-            }
-            case "--format": {
-                const value = takeValue(args, index, arg);
-                if (!["github", "json", "stylish"].includes(value)) {
-                    throw new Error(`Unsupported format: ${value}`);
-                }
-                format = value as CliOptions["format"];
-                index += 1;
-                break;
-            }
-            case "--frontmatter": {
-                frontmatter = takeValue(args, index, arg)
-                    .split(",")
-                    .map((value: string) => value.trim())
-                    .filter((value: string): value is "toml" | "yaml" =>
-                        value === "toml" || value === "yaml"
-                    );
-                index += 1;
-                break;
-            }
-            case "--remote-refs": {
-                const value = takeValue(args, index, arg);
-                if (!["all", "none", "same-origin"].includes(value)) {
-                    throw new Error(`Unsupported --remote-refs value: ${value}`);
-                }
-                remoteRefs =
-                    value === "none" ? false : (value as "all" | "same-origin");
-                index += 1;
-                break;
-            }
-            case "--require-frontmatter": {
-                requireFrontmatter = true;
-                break;
-            }
-            case "--require-schema": {
-                requireSchema = true;
-                break;
-            }
-            case "--schema": {
-                schema = takeValue(args, index, arg);
-                index += 1;
-                break;
-            }
-            case "--schema-key": {
-                schemaKey = takeValue(args, index, arg);
-                index += 1;
-                break;
-            }
-            case "--schema-map": {
-                schemaMaps.push(takeValue(args, index, arg));
-                index += 1;
-                break;
-            }
-            case "--timeout-ms": {
-                timeoutMs = Number.parseInt(takeValue(args, index, arg), 10);
-                index += 1;
-                break;
-            }
-            default: {
-                if (arg?.startsWith("--")) {
-                    throw new Error(`Unknown option: ${arg}`);
-                }
-                if (arg) {
-                    files.push(arg);
-                }
-            }
-        }
+    if (isDefined(options.schema)) {
+        schemas[options.schema] = ["**/*"];
     }
 
-    return {
-        allowInFileUrls,
-        config,
-        cwd,
-        extensions,
-        files,
-        format,
-        frontmatter,
-        remoteRefs,
-        requireFrontmatter,
-        requireSchema,
-        schema,
-        schemaKey,
-        schemaMaps,
-        timeoutMs,
-    };
+    return schemas;
+}
+
+function parseArgs(args: readonly string[]): CliOptions {
+    const options = defaultCliOptions();
+
+    for (let index = 0; index < args.length; ) {
+        index = parseArgument(args, index, options).nextIndex;
+    }
+
+    return options;
+}
+
+function parseArgument(
+    args: readonly string[],
+    index: number,
+    options: MutableCliOptions
+): ParsedArgument {
+    const arg = args[index];
+
+    if (!isDefined(arg)) {
+        return { nextIndex: index + 1 };
+    }
+
+    if (!arg.startsWith("--")) {
+        options.files.push(arg);
+
+        return { nextIndex: index + 1 };
+    }
+
+    return parseFlagArgument(args, index, arg, options);
+}
+
+function parseFlagArgument(
+    args: readonly string[],
+    index: number,
+    arg: string,
+    options: MutableCliOptions
+): ParsedArgument {
+    switch (arg) {
+        case "--allow-in-file-urls": {
+            options.allowInFileUrls = true;
+
+            return { nextIndex: index + 1 };
+        }
+        case "--cache": {
+            options.cache = true;
+
+            return { nextIndex: index + 1 };
+        }
+        case "--cache-dir": {
+            options.cacheDirectory = takeValue(args, index, arg);
+
+            return { nextIndex: index + 2 };
+        }
+        case "--cache-ttl-ms": {
+            options.cacheTtlMs = Number(takeValue(args, index, arg));
+
+            return { nextIndex: index + 2 };
+        }
+        case "--config": {
+            options.config = takeValue(args, index, arg);
+
+            return { nextIndex: index + 2 };
+        }
+        case "--cwd": {
+            options.cwd = path.resolve(takeValue(args, index, arg));
+
+            return { nextIndex: index + 2 };
+        }
+        case "--extensions": {
+            options.extensions = parseList(takeValue(args, index, arg));
+
+            return { nextIndex: index + 2 };
+        }
+        case "--format": {
+            options.format = parseOutputFormat(takeValue(args, index, arg));
+
+            return { nextIndex: index + 2 };
+        }
+        case "--frontmatter": {
+            options.frontmatter = parseFrontmatterFormats(
+                takeValue(args, index, arg)
+            );
+
+            return { nextIndex: index + 2 };
+        }
+        case "--no-cache": {
+            options.cache = false;
+
+            return { nextIndex: index + 1 };
+        }
+        case "--remote-refs": {
+            options.remoteRefs = parseRemoteRefs(takeValue(args, index, arg));
+
+            return { nextIndex: index + 2 };
+        }
+        case "--require-frontmatter": {
+            options.requireFrontmatter = true;
+
+            return { nextIndex: index + 1 };
+        }
+        case "--require-schema": {
+            options.requireSchema = true;
+
+            return { nextIndex: index + 1 };
+        }
+        case "--schema": {
+            options.schema = takeValue(args, index, arg);
+
+            return { nextIndex: index + 2 };
+        }
+        case "--schema-key": {
+            options.schemaKey = takeValue(args, index, arg);
+
+            return { nextIndex: index + 2 };
+        }
+        case "--schema-map": {
+            options.schemaMaps.push(takeValue(args, index, arg));
+
+            return { nextIndex: index + 2 };
+        }
+        case "--timeout-ms": {
+            options.timeoutMs = Number(takeValue(args, index, arg));
+
+            return { nextIndex: index + 2 };
+        }
+        default: {
+            throw new Error(`Unknown option: ${arg}`);
+        }
+    }
+}
+
+function parseFrontmatterFormats(value: string): ("toml" | "yaml")[] {
+    return parseList(value).filter(
+        (entry: string): entry is "toml" | "yaml" =>
+            entry === "toml" || entry === "yaml"
+    );
+}
+
+function parseList(value: string): string[] {
+    return stringSplit(value, ",")
+        .map((entry: string) => entry.trim())
+        .filter((entry) => entry !== "");
+}
+
+function parseOutputFormat(value: string): CliOptions["format"] {
+    if (!isOutputFormat(value)) {
+        throw new Error(`Unsupported format: ${value}`);
+    }
+
+    return value;
+}
+
+function parseRemoteRefs(value: string): CliOptions["remoteRefs"] {
+    if (!isRemoteRefMode(value)) {
+        throw new Error(`Unsupported --remote-refs value: ${value}`);
+    }
+
+    return value === "none" ? false : value;
 }
 
 function renderGitHub(results: readonly ValidationResult[]): string {
@@ -277,7 +424,7 @@ function renderGitHub(results: readonly ValidationResult[]): string {
         }
     }
 
-    return lines.join("\n");
+    return arrayJoin(lines, "\n");
 }
 
 function renderResults(
@@ -299,21 +446,45 @@ function renderStylish(results: readonly ValidationResult[]): string {
     const lines: string[] = [];
 
     for (const result of results) {
-        if (result.findings.length === 0) {
+        if (isEmpty(result.findings)) {
             continue;
         }
 
         lines.push(result.filePath);
 
         for (const finding of result.findings) {
-            lines.push(`  ${finding.line}:${finding.column}  ${finding.reason}`);
+            lines.push(
+                `  ${finding.line}:${finding.column}  ${finding.reason}`
+            );
         }
     }
 
-    return lines.join("\n");
+    return arrayJoin(lines, "\n");
 }
 
-function schemaMapEntries(schemaMaps: readonly string[]): Record<string, string[]> {
+async function resolveInputPattern(
+    pattern: string
+): Promise<ResolvedInputPattern> {
+    if (!path.isAbsolute(pattern)) {
+        return { kind: "glob", value: pattern };
+    }
+
+    try {
+        const stats = await stat(pattern);
+
+        if (stats.isFile()) {
+            return { kind: "file", value: pattern };
+        }
+    } catch {
+        return { kind: "glob", value: pattern };
+    }
+
+    return { kind: "glob", value: pattern };
+}
+
+function schemaMapEntries(
+    schemaMaps: readonly string[]
+): Record<string, string[]> {
     const schemas: Record<string, string[]> = {};
 
     for (const schemaMap of schemaMaps) {
@@ -324,18 +495,38 @@ function schemaMapEntries(schemaMaps: readonly string[]): Record<string, string[
         }
 
         const schema = schemaMap.slice(0, separatorIndex);
-        const glob = schemaMap.slice(separatorIndex + 1);
+        const globPattern = schemaMap.slice(separatorIndex + 1);
 
-        schemas[schema] = [...(schemas[schema] ?? []), glob];
+        schemas[schema] = [...(schemas[schema] ?? []), globPattern];
     }
 
     return schemas;
 }
 
-function takeValue(args: string[], index: number, flag: string): string {
+function settingsFromModule(value: unknown): Settings {
+    if (
+        isSettings(value) &&
+        objectHasOwn(value, "default") &&
+        isSettings(value.default)
+    ) {
+        return value.default;
+    }
+
+    if (isSettings(value)) {
+        return value;
+    }
+
+    throw new TypeError("Config module must export a settings object.");
+}
+
+function takeValue(
+    args: readonly string[],
+    index: number,
+    flag: string
+): string {
     const value = args[index + 1];
 
-    if (!value || value.startsWith("--")) {
+    if (!isDefined(value) || value === "" || value.startsWith("--")) {
         throw new Error(`${flag} requires a value.`);
     }
 
@@ -348,7 +539,11 @@ async function validateFiles(
 ): Promise<ValidationResult[]> {
     return Promise.all(
         files.map(async (filePath) =>
-            validateMarkdown(await readFile(filePath, "utf8"), filePath, settings)
+            validateMarkdown(
+                await readFile(filePath, "utf8"),
+                filePath,
+                settings
+            )
         )
     );
 }

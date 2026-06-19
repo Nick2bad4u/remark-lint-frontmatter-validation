@@ -1,10 +1,18 @@
 import type { ErrorObject } from "ajv";
 import type { UnknownArray, UnknownRecord } from "type-fest";
 
-import addFormatsImport from "ajv-formats";
+import applyFormatsImport from "ajv-formats";
 import { Ajv2020, type AnySchema } from "ajv/dist/2020.js";
 import * as path from "node:path";
 import picomatch from "picomatch";
+import {
+    arrayJoin,
+    keyIn,
+    objectEntries,
+    objectFromEntries,
+    objectHasOwn,
+    safeCastTo,
+} from "ts-extras";
 
 import type {
     NormalizedSettings,
@@ -13,11 +21,23 @@ import type {
     ValidationResult,
 } from "./types.js";
 
-import { type ExtractedFrontmatter, extractFrontmatter } from "./frontmatter.js";
+import {
+    type ExtractedFrontmatter,
+    extractFrontmatter,
+} from "./frontmatter.js";
 import { normalizeSettings } from "./options.js";
 import { loadSchema, type SchemaSource } from "./schema.js";
 
-const addFormats = addFormatsImport as unknown as (ajv: Ajv2020) => void;
+const applyFormats = applyFormatsImport as unknown as (ajv: Ajv2020) => void;
+
+interface ValidateFrontmatterDataOptions {
+    readonly ajv: Ajv2020;
+    readonly frontmatter: ExtractedFrontmatter;
+    readonly normalized: NormalizedSettings;
+    readonly schema: unknown;
+    readonly schemaLabel: string;
+    readonly schemaSource: SchemaSource | undefined;
+}
 
 /** Validate one Markdown document's frontmatter against its associated schema. */
 export async function validateMarkdown(
@@ -79,23 +99,19 @@ export async function validateMarkdown(
         strict: false,
         ...normalized.ajvOptions,
     });
-    addFormats(ajv);
+    applyFormats(ajv);
 
     try {
-        const validate = ajv.compile(loadedSchema.schema as AnySchema);
-        const data = schemaSource?.controlledByMarkdown
-            ? removeSchemaDirective(frontmatter, normalized)
-            : frontmatter.data;
-
-        validate(data);
-
-        if (validate.errors) {
-            findings.push(
-                ...validate.errors.map((error: ErrorObject) =>
-                    ajvErrorToFinding(error, frontmatter, loadedSchema.label)
-                )
-            );
-        }
+        findings.push(
+            ...(await validateFrontmatterData({
+                ajv,
+                frontmatter,
+                normalized,
+                schema: loadedSchema.schema,
+                schemaLabel: loadedSchema.label,
+                schemaSource,
+            }))
+        );
     } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
 
@@ -116,12 +132,17 @@ function ajvErrorToFinding(
     schemaLabel: string
 ): ValidationFinding {
     const position = frontmatter.locate(error.instancePath);
-    const params = error.params as UnknownRecord;
-    const noteParts = [`Keyword: ${error.keyword}`, `Schema path: ${error.schemaPath}`];
+    const params = safeCastTo<UnknownRecord>(error.params);
+    const noteParts = [
+        `Keyword: ${error.keyword}`,
+        `Schema path: ${error.schemaPath}`,
+    ];
     const expected = expectedValues(error);
 
     if (expected) {
-        noteParts.push(`Allowed values: ${expected.join(", ")}`);
+        noteParts.push(
+            `Allowed values: ${arrayJoin(expected.map(String), ", ")}`
+        );
     }
 
     if (typeof params["missingProperty"] === "string") {
@@ -136,21 +157,23 @@ function ajvErrorToFinding(
         column: position?.column ?? 1,
         fatal: true,
         line: position?.line ?? frontmatter.startLine,
-        note: noteParts.join("\n"),
+        note: arrayJoin(noteParts, "\n"),
         reason: formatAjvReason(error, schemaLabel),
         schema: error,
         ...(expected && { expected }),
     };
 }
 
-function expectedValues(error: ErrorObject): Readonly<UnknownArray> | undefined {
-    const params = error.params as UnknownRecord;
+function expectedValues(
+    error: ErrorObject
+): Readonly<UnknownArray> | undefined {
+    const params = safeCastTo<UnknownRecord>(error.params);
 
     if (Array.isArray(params["allowedValues"])) {
-        return params["allowedValues"];
+        return safeCastTo<Readonly<UnknownArray>>(params["allowedValues"]);
     }
 
-    if ("allowedValue" in params) {
+    if (keyIn(params, "allowedValue")) {
         return [params["allowedValue"]];
     }
 
@@ -161,7 +184,7 @@ function formatAjvReason(error: ErrorObject, schemaLabel: string): string {
     const message = error.message
         ? `${error.message.charAt(0).toUpperCase()}${error.message.slice(1)}`
         : `Schema validation failed for ${error.keyword}`;
-    const pathLabel = error.instancePath || "/";
+    const pathLabel = error.instancePath === "" ? "/" : error.instancePath;
 
     return `${pathLabel}: ${message} • ${schemaLabel} • ${error.schemaPath}`;
 }
@@ -169,22 +192,24 @@ function formatAjvReason(error: ErrorObject, schemaLabel: string): string {
 function isExtractedFrontmatter(
     value: ExtractedFrontmatter | ValidationFinding
 ): value is ExtractedFrontmatter {
-    return "data" in value;
+    return objectHasOwn(value, "data");
 }
 
 function relativeMarkdownPath(markdownPath: string, cwd: string): string {
-    return path.relative(cwd, path.resolve(markdownPath)).replaceAll(path.sep, "/");
+    return path
+        .relative(cwd, path.resolve(markdownPath))
+        .replaceAll(path.sep, "/");
 }
 
 function removeSchemaDirective(
     frontmatter: ExtractedFrontmatter,
     settings: NormalizedSettings
 ): UnknownRecord {
-    const data = { ...frontmatter.data };
-
-    delete data[settings.schemaKey];
-
-    return data;
+    return objectFromEntries(
+        objectEntries(frontmatter.data).filter(
+            ([key]) => key !== settings.schemaKey
+        )
+    );
 }
 
 function schemaFromAssociations(
@@ -193,8 +218,12 @@ function schemaFromAssociations(
 ): SchemaSource | undefined {
     const relativePath = relativeMarkdownPath(markdownPath, settings.cwd);
 
-    for (const [schema, patterns] of Object.entries(settings.schemas ?? {})) {
-        if (patterns.some((pattern) => picomatch.isMatch(relativePath, pattern))) {
+    const schemaEntries = objectEntries(settings.schemas ?? {});
+
+    for (const [schema, patterns] of schemaEntries) {
+        if (
+            patterns.some((pattern) => picomatch.isMatch(relativePath, pattern))
+        ) {
             return { controlledByMarkdown: false, value: schema };
         }
     }
@@ -211,4 +240,23 @@ function schemaFromFrontmatter(
     return typeof value === "string"
         ? { controlledByMarkdown: true, value }
         : undefined;
+}
+
+async function validateFrontmatterData(
+    options: ValidateFrontmatterDataOptions
+): Promise<ValidationFinding[]> {
+    const validate = options.ajv.compile(options.schema as AnySchema);
+    const data =
+        options.schemaSource?.controlledByMarkdown === true
+            ? removeSchemaDirective(options.frontmatter, options.normalized)
+            : options.frontmatter.data;
+    const result = validate(data);
+
+    if (result instanceof Promise) {
+        await result;
+    }
+
+    return (validate.errors ?? []).map((error: ErrorObject) =>
+        ajvErrorToFinding(error, options.frontmatter, options.schemaLabel)
+    );
 }

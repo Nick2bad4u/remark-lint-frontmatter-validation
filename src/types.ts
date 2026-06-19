@@ -17,17 +17,37 @@ export interface FrontmatterDefinition {
 }
 
 /** Normalized settings with defaults applied. */
-export interface NormalizedSettings
-    extends Omit<Settings, "cwd" | "extensions" | "frontmatter" | "remote" | "schemaKey"> {
+export interface NormalizedSettings extends Omit<
+    Settings,
+    "cwd" | "extensions" | "frontmatter" | "remote" | "schemaKey"
+> {
     readonly cwd: string;
     readonly extensions: readonly string[];
     readonly frontmatter: readonly FrontmatterDefinition[];
     readonly remote: Required<
-        Pick<RemoteSchemaOptions, "allowInFileUrls" | "enabled" | "maxBytes" | "refs" | "timeoutMs">
+        Pick<
+            RemoteSchemaOptions,
+            "allowInFileUrls" | "enabled" | "maxBytes" | "refs" | "timeoutMs"
+        >
     > & {
         readonly allowedHosts: readonly string[] | undefined;
+        readonly cache: Required<
+            Pick<RemoteSchemaCacheOptions, "enabled" | "ttlMs">
+        > & {
+            readonly directory: string | undefined;
+        };
     };
     readonly schemaKey: string;
+}
+
+/** Persistent cache controls for fetched remote schemas. */
+export interface RemoteSchemaCacheOptions {
+    /** Cache directory. Relative paths resolve from `cwd`. */
+    readonly directory?: string;
+    /** Whether to cache fetched remote schemas on disk. */
+    readonly enabled?: boolean;
+    /** Cache entry lifetime in milliseconds. Use `false` to never expire. */
+    readonly ttlMs?: false | number;
 }
 
 /** Remote schema resolution controls. */
@@ -36,6 +56,8 @@ export interface RemoteSchemaOptions {
     readonly allowedHosts?: readonly string[] | undefined;
     /** Whether Markdown-controlled URL schemas are allowed. */
     readonly allowInFileUrls?: boolean;
+    /** Persistent cache controls for fetched remote schemas. */
+    readonly cache?: RemoteSchemaCacheOptions;
     /** Whether configured URL schemas can be fetched. */
     readonly enabled?: boolean;
     /** Maximum response body size in bytes. */
@@ -57,7 +79,10 @@ export interface Settings {
     /** File extensions considered Markdown-family by the standalone CLI. */
     readonly extensions?: readonly string[];
     /** Frontmatter syntaxes to detect. */
-    readonly frontmatter?: readonly (BuiltInFrontmatterFormat | FrontmatterDefinition)[];
+    readonly frontmatter?: readonly (
+        | BuiltInFrontmatterFormat
+        | FrontmatterDefinition
+    )[];
     /** Remote schema resolution controls. */
     readonly remote?: RemoteSchemaOptions;
     /** Emit a finding when a file lacks frontmatter. */
@@ -87,6 +112,8 @@ export interface ValidationResult {
     readonly findings: readonly ValidationFinding[];
 }
 
+/** Markdown-family extensions scanned by the CLI when callers do not pass
+explicit globs. */
 export const defaultExtensions = [
     ".markdown",
     ".md",
@@ -98,6 +125,7 @@ export const defaultExtensions = [
     ".mkdown",
 ] as const;
 
+/** Built-in YAML and TOML frontmatter fence definitions. */
 export const defaultFrontmatterDefinitions: readonly FrontmatterDefinition[] = [
     { name: "toml", open: "+++", parser: "toml" },
     { name: "yaml", open: "---", parser: "yaml" },

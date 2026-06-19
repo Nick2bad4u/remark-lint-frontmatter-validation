@@ -1,16 +1,27 @@
 import type { UnknownRecord } from "type-fest";
 
 import $RefParser from "@apidevtools/json-schema-ref-parser";
-import { existsSync } from "node:fs";
-import { readFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import * as path from "node:path";
+import { isDefined, isEmpty, keyIn, objectValues, setHas } from "ts-extras";
 import YAML from "yaml";
 
 import type { NormalizedSettings } from "./types.js";
 
+/** Schema source selected from frontmatter or configured file associations. */
 export interface SchemaSource {
+    /** Whether Markdown content supplied the schema path or URL. */
     readonly controlledByMarkdown: boolean;
+    /** Local path or HTTP(S) URL for the JSON Schema. */
     readonly value: string;
+}
+
+interface RemoteSchemaCacheEntry {
+    readonly data: unknown;
+    readonly source: string;
+    readonly timestamp: number;
+    readonly version: 1;
 }
 
 interface ResolvedSchema {
@@ -18,15 +29,21 @@ interface ResolvedSchema {
     readonly schema: unknown;
 }
 
+const packageName = "remark-lint-frontmatter-validation";
 const remoteSchemaCache = new Map<string, unknown>();
 
-/** Load and optionally bundle a schema from an embedded object, local file, or URL. */
+/**
+ * Load and optionally bundle a schema from an embedded object, local file, or
+ * URL.
+ *
+ * @throws When a schema source cannot be read, fetched, parsed, or bundled.
+ */
 export async function loadSchema(
     source: SchemaSource | undefined,
     markdownPath: string,
     settings: NormalizedSettings
 ): Promise<ResolvedSchema | undefined> {
-    if (settings.embed && typeof settings.embed === "object") {
+    if (isDefined(settings.embed) && typeof settings.embed === "object") {
         return {
             label: "embedded schema",
             schema: settings.embed,
@@ -39,7 +56,9 @@ export async function loadSchema(
 
     if (isUrl(source.value)) {
         if (source.controlledByMarkdown && !settings.remote.allowInFileUrls) {
-            throw new Error(`In-file remote schema URLs are disabled: ${source.value}`);
+            throw new Error(
+                `In-file remote schema URLs are disabled: ${source.value}`
+            );
         }
 
         const schema = await fetchRemoteSchema(source.value, settings);
@@ -61,7 +80,11 @@ export async function loadSchema(
         };
     }
 
-    const schemaPath = normalizeSchemaPath(source.value, markdownPath, settings.cwd);
+    const schemaPath = await normalizeSchemaPath(
+        source.value,
+        markdownPath,
+        settings.cwd
+    );
     const text = await readFile(schemaPath, "utf8");
     const parsed = parseSchemaText(text, schemaPath);
     assertRemoteRefsAllowed(parsed, schemaPath, settings);
@@ -81,8 +104,15 @@ function assertAllowedRemoteUrl(url: URL, settings: NormalizedSettings): void {
     }
 
     const allowedHosts = settings.remote.allowedHosts ?? [];
-    if (allowedHosts.length > 0 && !allowedHosts.includes(url.hostname)) {
-        throw new Error(`Remote schema host is not allowed: ${url.hostname}`);
+    const hostname: string = url.hostname;
+    const allowedHostSet = new Set<string>(allowedHosts);
+    const isAllowedHost = setHas(allowedHostSet, hostname);
+    if (!isEmpty(allowedHosts) && !isAllowedHost) {
+        const rejectedUrl = new URL(url.href);
+
+        throw new Error(
+            `Remote schema host is not allowed: ${rejectedUrl.hostname}`
+        );
     }
 }
 
@@ -93,7 +123,7 @@ function assertRemoteRefsAllowed(
 ): void {
     const refs = findRemoteRefs(schema);
 
-    if (refs.length === 0) {
+    if (isEmpty(refs)) {
         return;
     }
 
@@ -103,14 +133,23 @@ function assertRemoteRefsAllowed(
 
     if (settings.remote.refs === "same-origin") {
         if (!isUrl(source)) {
-            throw new Error(`Remote $ref values require a remote schema source: ${source}`);
+            throw new Error(
+                `Remote $ref values require a remote schema source: ${source}`
+            );
         }
 
-        const origin = new URL(source).origin;
-        const disallowed = refs.find((ref) => new URL(ref).origin !== origin);
+        const sourceUrl = new URL(source);
+        const origin = sourceUrl.origin;
+        const disallowed = refs.find((ref) => {
+            const refUrl = new URL(ref);
 
-        if (disallowed) {
-            throw new Error(`Remote $ref is outside the schema origin: ${disallowed}`);
+            return refUrl.origin !== origin;
+        });
+
+        if (isDefined(disallowed)) {
+            throw new Error(
+                `Remote $ref is outside the schema origin: ${disallowed}`
+            );
         }
     }
 }
@@ -119,7 +158,8 @@ function buildRefParserOptions(
     source: string,
     settings: NormalizedSettings
 ): UnknownRecord {
-    const sourceOrigin = isUrl(source) ? new URL(source).origin : undefined;
+    const sourceUrl = isUrl(source) ? new URL(source) : undefined;
+    const sourceOrigin = sourceUrl?.origin;
 
     return {
         resolve: {
@@ -131,8 +171,8 @@ function buildRefParserOptions(
                           read: async (file: { readonly url: string }) => {
                               if (
                                   settings.remote.refs === "same-origin" &&
-                                  sourceOrigin &&
-                                  new URL(file.url).origin !== sourceOrigin
+                                  isDefined(sourceOrigin) &&
+                                  remoteOrigin(file.url) !== sourceOrigin
                               ) {
                                   throw new Error(
                                       `Remote $ref is outside the schema origin: ${file.url}`
@@ -150,13 +190,19 @@ async function fetchRemoteSchema(
     source: string,
     settings: NormalizedSettings
 ): Promise<unknown> {
-    const cached = remoteSchemaCache.get(source);
-    if (cached) {
-        return cached;
+    if (remoteSchemaCache.has(source)) {
+        return remoteSchemaCache.get(source);
     }
 
     const url = new URL(source);
     assertAllowedRemoteUrl(url, settings);
+
+    const cachedSchema = await readCachedRemoteSchema(source, settings);
+    if (isDefined(cachedSchema)) {
+        remoteSchemaCache.set(source, cachedSchema);
+
+        return cachedSchema;
+    }
 
     const controller = new AbortController();
     const timer = setTimeout(() => {
@@ -170,28 +216,13 @@ async function fetchRemoteSchema(
             signal: controller.signal,
         });
 
-        if (!response.ok) {
-            throw new Error(`Remote schema returned HTTP ${response.status}: ${url.href}`);
-        }
-
-        const contentLength = response.headers.get("content-length");
-        if (
-            contentLength &&
-            Number.parseInt(contentLength, 10) > settings.remote.maxBytes
-        ) {
-            throw new Error(
-                `Remote schema is larger than ${settings.remote.maxBytes} bytes: ${url.href}`
-            );
-        }
-
-        const bytes = await response.arrayBuffer();
-        if (bytes.byteLength > settings.remote.maxBytes) {
-            throw new Error(
-                `Remote schema is larger than ${settings.remote.maxBytes} bytes: ${url.href}`
-            );
-        }
-
-        const schema = parseSchemaText(new TextDecoder().decode(bytes), source);
+        const schema = await parseRemoteResponse(
+            response,
+            url,
+            settings,
+            source
+        );
+        await writeCachedRemoteSchema(source, schema, settings);
         remoteSchemaCache.set(source, schema);
 
         return schema;
@@ -200,8 +231,18 @@ async function fetchRemoteSchema(
     }
 }
 
+async function fileExists(filePath: string): Promise<boolean> {
+    try {
+        const stats = await stat(filePath);
+
+        return stats.isFile();
+    } catch {
+        return false;
+    }
+}
+
 function findRemoteRefs(schema: unknown, refs: string[] = []): string[] {
-    if (!schema || typeof schema !== "object") {
+    if (schema === null || typeof schema !== "object") {
         return refs;
     }
 
@@ -220,28 +261,97 @@ function findRemoteRefs(schema: unknown, refs: string[] = []): string[] {
         refs.push(ref);
     }
 
-    for (const value of Object.values(record)) {
+    for (const value of objectValues(record)) {
         findRemoteRefs(value, refs);
     }
 
     return refs;
 }
 
+function isRemoteSchemaCacheEntry(
+    value: unknown
+): value is RemoteSchemaCacheEntry {
+    if (value === null || typeof value !== "object" || Array.isArray(value)) {
+        return false;
+    }
+
+    const record = value as UnknownRecord;
+
+    return (
+        record["version"] === 1 &&
+        typeof record["source"] === "string" &&
+        typeof record["timestamp"] === "number" &&
+        keyIn(record, "data")
+    );
+}
+
 function isUrl(value: string): boolean {
     return /^https?:\/\//iv.test(value);
 }
 
-function normalizeSchemaPath(source: string, markdownPath: string, cwd: string): string {
+function isUsableRemoteSchemaCacheEntry(
+    value: unknown,
+    source: string,
+    settings: NormalizedSettings
+): value is RemoteSchemaCacheEntry {
+    if (!isRemoteSchemaCacheEntry(value) || value.source !== source) {
+        return false;
+    }
+
+    const ttlMs = settings.remote.cache.ttlMs;
+
+    return ttlMs === false || value.timestamp + ttlMs >= Date.now();
+}
+
+async function normalizeSchemaPath(
+    source: string,
+    markdownPath: string,
+    cwd: string
+): Promise<string> {
     if (path.isAbsolute(source)) {
         return source;
     }
 
     const fromMarkdown = path.resolve(path.dirname(markdownPath), source);
-    if (existsSync(fromMarkdown)) {
+    if (await fileExists(fromMarkdown)) {
         return fromMarkdown;
     }
 
     return path.resolve(cwd, source.replace(/^\.?\//v, ""));
+}
+
+async function parseRemoteResponse(
+    response: Response,
+    url: URL,
+    settings: NormalizedSettings,
+    source: string
+): Promise<unknown> {
+    if (!response.ok) {
+        throw new Error(
+            `Remote schema returned HTTP ${response.status}: ${url.href}`
+        );
+    }
+
+    const contentLength = response.headers.get("content-length");
+    if (
+        contentLength !== null &&
+        Number(contentLength) > settings.remote.maxBytes
+    ) {
+        throw new Error(
+            `Remote schema is larger than ${settings.remote.maxBytes} bytes: ${url.href}`
+        );
+    }
+
+    const bytes = await response.arrayBuffer();
+    if (bytes.byteLength > settings.remote.maxBytes) {
+        throw new Error(
+            `Remote schema is larger than ${settings.remote.maxBytes} bytes: ${url.href}`
+        );
+    }
+
+    const decoder = new TextDecoder();
+
+    return parseSchemaText(decoder.decode(bytes), source);
 }
 
 function parseSchemaText(text: string, source: string): unknown {
@@ -255,5 +365,89 @@ function parseSchemaText(text: string, source: string): unknown {
         return JSON.parse(text) as unknown;
     } catch {
         return YAML.parse(text) as unknown;
+    }
+}
+
+async function readCachedRemoteSchema(
+    source: string,
+    settings: NormalizedSettings
+): Promise<unknown> {
+    if (!settings.remote.cache.enabled) {
+        return undefined;
+    }
+
+    try {
+        const cacheData = await readRemoteSchemaCacheEntry(source, settings);
+        if (!isUsableRemoteSchemaCacheEntry(cacheData, source, settings)) {
+            return undefined;
+        }
+
+        return cacheData.data;
+    } catch {
+        return undefined;
+    }
+}
+
+async function readRemoteSchemaCacheEntry(
+    source: string,
+    settings: NormalizedSettings
+): Promise<unknown> {
+    const cacheText = await readFile(
+        remoteSchemaCachePath(source, settings),
+        "utf8"
+    );
+
+    return JSON.parse(cacheText) as unknown;
+}
+
+function remoteOrigin(value: string): string {
+    const url = new URL(value);
+
+    return url.origin;
+}
+
+function remoteSchemaCacheDirectory(settings: NormalizedSettings): string {
+    const directory = settings.remote.cache.directory;
+
+    if (isDefined(directory) && directory !== "") {
+        return path.isAbsolute(directory)
+            ? directory
+            : path.resolve(settings.cwd, directory);
+    }
+
+    return path.resolve(settings.cwd, "node_modules", ".cache", packageName);
+}
+
+function remoteSchemaCachePath(
+    source: string,
+    settings: NormalizedSettings
+): string {
+    const hash = createHash("sha256").update(source).digest("hex");
+
+    return path.join(remoteSchemaCacheDirectory(settings), `${hash}.json`);
+}
+
+async function writeCachedRemoteSchema(
+    source: string,
+    schema: unknown,
+    settings: NormalizedSettings
+): Promise<void> {
+    if (!settings.remote.cache.enabled) {
+        return;
+    }
+
+    const cachePath = remoteSchemaCachePath(source, settings);
+    const cacheEntry: RemoteSchemaCacheEntry = {
+        data: schema,
+        source,
+        timestamp: Date.now(),
+        version: 1,
+    };
+
+    try {
+        await mkdir(path.dirname(cachePath), { recursive: true });
+        await writeFile(cachePath, `${JSON.stringify(cacheEntry)}\n`, "utf8");
+    } catch {
+        // Validation should not fail just because the schema cache is read-only.
     }
 }

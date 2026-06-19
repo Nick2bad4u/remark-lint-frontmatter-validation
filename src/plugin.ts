@@ -10,7 +10,10 @@ import { validateMarkdown } from "./validate.js";
 const origin = "remark-lint:frontmatter-validation";
 const url = "https://github.com/Nick2bad4u/remark-lint-frontmatter-validation";
 
-/** Remark lint rule that validates leading Markdown frontmatter against JSON Schema. */
+/**
+ * Remark lint rule that validates leading Markdown frontmatter against JSON
+ * Schema.
+ */
 const remarkLintFrontmatterValidation = lintRule(
     { origin, url },
     async (_tree: Root, file: VFile, settings: false | Settings) => {
@@ -18,16 +21,21 @@ const remarkLintFrontmatterValidation = lintRule(
             return;
         }
 
-        const markdown = String(file.value ?? "");
-        const filePath = file.path ?? "markdown.md";
+        const markdown = String(file.value);
+        const rawFilePath = Reflect.get(file, "path");
+        const filePath =
+            typeof rawFilePath === "string" && rawFilePath !== ""
+                ? rawFilePath
+                : "markdown.md";
         const result = await validateMarkdown(markdown, filePath, settings);
 
         for (const finding of result.findings) {
-            const message = file.message(new Error(finding.reason));
+            const message = file.message(finding.reason, {
+                column: finding.column,
+                line: finding.line,
+            });
 
-            message.fatal = finding.fatal ?? true;
-            message.line = finding.line;
-            message.column = finding.column;
+            message.fatal = finding.fatal;
             message.name = "Markdown frontmatter validation error";
             message.note = finding.note;
             message.expected = finding.expected?.map(String);

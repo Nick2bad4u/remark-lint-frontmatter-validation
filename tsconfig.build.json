@@ -17,7 +17,7 @@
         "dist/**",
         "node_modules/**",
         "test/**",
-        "vitest.config.ts"
+        "vite.config.ts"
     ],
     "extends": "./tsconfig.json",
     "include": [

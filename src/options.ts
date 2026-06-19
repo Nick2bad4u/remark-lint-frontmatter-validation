@@ -7,7 +7,12 @@ import {
     type Settings,
 } from "./types.js";
 
-const frontmatterByName = new Map<BuiltInFrontmatterFormat, FrontmatterDefinition>(
+const defaultRemoteSchemaCacheTtlMs = 1000 * 60 * 60 * 24 * 30;
+
+const frontmatterByName = new Map<
+    BuiltInFrontmatterFormat,
+    FrontmatterDefinition
+>(
     defaultFrontmatterDefinitions.map((definition) => [
         definition.name as BuiltInFrontmatterFormat,
         definition,
@@ -17,17 +22,23 @@ const frontmatterByName = new Map<BuiltInFrontmatterFormat, FrontmatterDefinitio
 /** Apply package defaults to user settings. */
 export function normalizeSettings(settings: Settings = {}): NormalizedSettings {
     const remote = settings.remote ?? {};
+    const remoteCache = remote.cache ?? {};
 
     return {
         ...settings,
         cwd: settings.cwd ?? process.cwd(),
         extensions: settings.extensions ?? defaultExtensions,
-        frontmatter: (settings.frontmatter ?? defaultFrontmatterDefinitions).map(
-            normalizeFrontmatterDefinition
-        ),
+        frontmatter: (
+            settings.frontmatter ?? defaultFrontmatterDefinitions
+        ).map((definition) => normalizeFrontmatterDefinition(definition)),
         remote: {
             allowedHosts: remote.allowedHosts,
             allowInFileUrls: remote.allowInFileUrls ?? false,
+            cache: {
+                directory: remoteCache.directory,
+                enabled: remoteCache.enabled ?? true,
+                ttlMs: remoteCache.ttlMs ?? defaultRemoteSchemaCacheTtlMs,
+            },
             enabled: remote.enabled ?? true,
             maxBytes: remote.maxBytes ?? 1_048_576,
             refs: remote.refs ?? false,

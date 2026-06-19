@@ -1,0 +1,16 @@
+{
+    "$schema": "https://www.schemastore.org/tsconfig.json",
+    "compilerOptions": {
+        "noEmit": true,
+        "types": [
+            "node",
+            "vitest"
+        ]
+    },
+    "extends": "./tsconfig.json",
+    "include": [
+        "src/**/*.ts",
+        "test/**/*.ts",
+        "vite.config.ts"
+    ]
+}

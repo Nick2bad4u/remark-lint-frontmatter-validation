@@ -2,7 +2,7 @@
 
 Use the shortest template that matches your change:
 
-- `feature.md` for new rules, options, or user-visible behavior
+- `feature.md` for new options, schema behavior, parser support, or user-visible behavior
 - `bugfix.md` for defects and regressions
 - `maintenance.md` for refactors/dependency/build/tooling work
 - `documentation.md` for docs-only updates
@@ -11,7 +11,7 @@ Use the shortest template that matches your change:
 
 When relevant, include:
 
-- impacted rule IDs and preset/config implications,
-- autofix/suggestion safety notes,
-- tests covering valid/invalid/edge/fixer scenarios,
-- docs updates (`docs/rules/<rule-id>.md`) for rule changes.
+- impacted plugin or CLI options,
+- security notes for local or remote schema loading,
+- tests covering valid, invalid, edge, and CLI scenarios,
+- README updates for user-visible behavior.

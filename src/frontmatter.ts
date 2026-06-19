@@ -1,11 +1,14 @@
 import type { UnknownRecord } from "type-fest";
 
 import * as smolToml from "smol-toml";
-import YAML, {
-    type Document,
-    isNode,
-    LineCounter,
-} from "yaml";
+import {
+    arrayFirst,
+    arrayJoin,
+    isDefined,
+    setHas,
+    stringSplit,
+} from "ts-extras";
+import YAML, { type Document, isNode, LineCounter } from "yaml";
 
 import type {
     FrontmatterDefinition,
@@ -13,10 +16,13 @@ import type {
     ValidationFinding,
 } from "./types.js";
 
+/** Parsed leading frontmatter and source-location helpers for schema findings. */
 export interface ExtractedFrontmatter {
     readonly data: UnknownRecord;
     readonly definition: FrontmatterDefinition;
-    readonly locate: (instancePath: string) => undefined | { line: number; column: number };
+    readonly locate: (
+        instancePath: string
+    ) => undefined | { column: number; line: number };
     readonly raw: string;
     readonly startLine: number;
 }
@@ -50,11 +56,11 @@ export function extractFrontmatter(
         };
     }
 
-    const lines = text.split(/\r?\n/v);
+    const lines = splitLines(text);
     const closeFence = definition.close ?? definition.open;
     const closingIndex = findClosingFence(lines, closeFence);
 
-    if (!closingIndex) {
+    if (!isDefined(closingIndex)) {
         return {
             column: 1,
             line: 1,
@@ -62,7 +68,7 @@ export function extractFrontmatter(
         };
     }
 
-    const raw = lines.slice(1, closingIndex).join("\n");
+    const raw = arrayJoin(lines.slice(1, closingIndex), "\n");
     const startLine = 2;
 
     try {
@@ -84,7 +90,8 @@ export function extractFrontmatter(
         return {
             data: parsed.data,
             definition,
-            locate: (instancePath) => locateTomlPath(raw, instancePath, startLine),
+            locate: (instancePath) =>
+                locateTomlPath(raw, instancePath, startLine),
             raw,
             startLine,
         };
@@ -97,6 +104,32 @@ export function extractFrontmatter(
             reason: `${definition.name.toUpperCase()} frontmatter parsing failed: ${message}`,
         };
     }
+}
+
+function escapeRegExp(value: string): string {
+    const specialCharacters = new Set([
+        "$",
+        "(",
+        ")",
+        "*",
+        "+",
+        ".",
+        "?",
+        "[",
+        "\\",
+        "]",
+        "^",
+        "{",
+        "|",
+        "}",
+    ]);
+
+    return arrayJoin(
+        Array.from(value, (character) =>
+            setHas(specialCharacters, character) ? `\\${character}` : character
+        ),
+        ""
+    );
 }
 
 function findClosingFence(
@@ -112,8 +145,12 @@ function findClosingFence(
     return undefined;
 }
 
+function isUnknownRecord(value: unknown): value is UnknownRecord {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 function lineAt(text: string, lineIndex: number): string | undefined {
-    return text.split(/\r?\n/v)[lineIndex];
+    return splitLines(text)[lineIndex];
 }
 
 function locateTomlPath(
@@ -123,11 +160,11 @@ function locateTomlPath(
 ): undefined | { column: number; line: number } {
     const [firstSegment] = pointerSegments(instancePath);
 
-    if (!firstSegment) {
+    if (!isDefined(firstSegment)) {
         return undefined;
     }
 
-    const lines = raw.split(/\r?\n/v);
+    const lines = splitLines(raw);
     const matcher = new RegExp(
         String.raw`^\s*${escapeRegExp(firstSegment)}\s*=`,
         "u"
@@ -146,22 +183,18 @@ function locateTomlPath(
     };
 }
 
-function escapeRegExp(value: string): string {
-    return value.replaceAll(/[$()*+.?[\\\]^{|}]/gu, String.raw`\$&`);
-}
-
 function locateYamlPath(
     parsed: ParsedYamlFrontmatter,
     instancePath: string,
     startLine: number
-): undefined | { column: number; line: number; } {
+): undefined | { column: number; line: number } {
     const node = parsed.document.getIn(pointerSegments(instancePath), true);
 
     if (!isNode(node) || !node.range) {
         return undefined;
     }
 
-    const position = parsed.lineCounter.linePos(node.range[0]);
+    const position = parsed.lineCounter.linePos(arrayFirst(node.range));
 
     return {
         column: position.col,
@@ -178,7 +211,8 @@ function parseTomlFrontmatter(raw: string): ParsedTomlFrontmatter {
 function parseYamlFrontmatter(raw: string): ParsedYamlFrontmatter {
     const lineCounter = new LineCounter();
     const document = YAML.parseDocument(raw, { lineCounter });
-    const data = document.toJS() as null | UnknownRecord;
+    const parsedData: unknown = document.toJS();
+    const data = isUnknownRecord(parsedData) ? parsedData : null;
 
     return {
         data: data ?? {},
@@ -188,11 +222,16 @@ function parseYamlFrontmatter(raw: string): ParsedYamlFrontmatter {
 }
 
 function pointerSegments(instancePath: string): string[] {
-    return instancePath
-        .replace(/^\//v, "")
-        .split("/")
+    return stringSplit(instancePath.replace(/^\//v, ""), "/")
         .filter(Boolean)
         .map((segment) => segment.replaceAll("~1", "/").replaceAll("~0", "~"));
+}
+
+function splitLines(value: string): string[] {
+    return stringSplit(
+        value.replaceAll("\r\n", "\n").replaceAll("\r", "\n"),
+        "\n"
+    );
 }
 
 function stripByteOrderMark(text: string): string {

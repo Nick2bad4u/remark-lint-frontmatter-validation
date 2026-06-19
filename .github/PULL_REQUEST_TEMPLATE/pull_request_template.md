@@ -7,14 +7,14 @@
 
 - [ ] `npm run typecheck`
 - [ ] `npm run test`
-- [ ] `npm run lint:all:fix:quiet` (or explain why not run)
-- [ ] If docs touched: `npm run docs:typecheck`
-- [ ] If rules changed: updated/added rule tests (valid/invalid/edge/fixer)
-- [ ] If rule behavior changed: updated `docs/rules/<rule-id>.md`
+- [ ] `npm run lint:all`
+- [ ] If docs touched: README and package metadata are still accurate
+- [ ] If validation behavior changed: updated/added plugin and CLI tests
+- [ ] If remote schema behavior changed: security defaults and cache behavior are covered
 
 ## Impact
 
 - Affected areas:
 - Breaking changes: Yes/No
-- Autofix/suggestion risk:
+- Remote schema/security risk:
 - Rollback plan:

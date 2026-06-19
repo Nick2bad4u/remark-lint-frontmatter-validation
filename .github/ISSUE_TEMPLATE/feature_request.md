@@ -1,6 +1,6 @@
 ---
 name: Feature request
-about: Suggest a new rule or improvement for eslint-plugin-tsconfig
+about: Suggest a new feature or improvement for remark-lint-frontmatter-validation
 title: "Feature: "
 labels:
  - enhancement
@@ -14,13 +14,13 @@ assignees: []
 
 ## Proposed solution
 
-<!-- Describe expected behavior, messages, and fixer/suggestion expectations. -->
+<!-- Describe expected behavior, messages, options, and compatibility expectations. -->
 
 ## Scope
 
-- Type: New rule / Rule enhancement / Config preset / Docs / Tooling
-- Affected rule IDs (if any):
-- Requires type checking?: Yes / No / Unsure
+- Type: Plugin / CLI / Schema loading / Frontmatter parsing / Docs / Tooling
+- Affected option(s), if any:
+- Requires network access?: Yes / No / Unsure
 
 ## Alternatives considered
 
@@ -28,19 +28,23 @@ assignees: []
 
 ### Before
 
-```ts
-// Code that should be reported (if applicable)
+```md
+---
+title: Before
+---
 ```
 
 ### After
 
-```ts
-// Desired code after fix/suggestion
+```md
+---
+title: After
+---
 ```
 
 ## Acceptance criteria
 
-- [ ] Clear, actionable diagnostic message(s)
-- [ ] Safe autofix or suggestion behavior defined
-- [ ] Test coverage plan (valid/invalid/edge/fixer)
-- [ ] Documentation impact identified (`docs/rules/<rule-id>.md` if rule-related)
+- [ ] Clear, actionable diagnostic message(s) or CLI output
+- [ ] Security impact for local or remote schemas considered
+- [ ] Test coverage plan identified
+- [ ] Documentation impact identified

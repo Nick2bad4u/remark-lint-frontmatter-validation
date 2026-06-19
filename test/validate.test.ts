@@ -1,4 +1,4 @@
-import { execFile } from "node:child_process";
+import { type ExecException, execFile } from "node:child_process";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
@@ -13,14 +13,22 @@ import { validateMarkdown } from "../src/validate.js";
 
 const execFileAsync = promisify(execFile);
 
+interface FailedCommand {
+    readonly code: number | undefined;
+    readonly stdout: string;
+}
+
 interface RemoteFixture {
     readonly close: () => Promise<void>;
+    readonly requests: () => number;
     readonly url: string;
 }
 
 async function createRemoteSchema(schema: unknown): Promise<RemoteFixture> {
+    let requests = 0;
     const server = createServer((request, response) => {
         if (request.url === "/schema.json") {
+            requests += 1;
             response.setHeader("content-type", "application/schema+json");
             response.end(JSON.stringify(schema));
             return;
@@ -42,7 +50,7 @@ async function createRemoteSchema(schema: unknown): Promise<RemoteFixture> {
     return {
         close: () =>
             new Promise<void>((resolve, reject) => {
-                (server).close((error) => {
+                server.close((error) => {
                     if (error) {
                         reject(error);
                     } else {
@@ -50,8 +58,26 @@ async function createRemoteSchema(schema: unknown): Promise<RemoteFixture> {
                     }
                 });
             }),
+        requests: () => requests,
         url: `http://127.0.0.1:${address.port}/schema.json`,
     };
+}
+
+async function expectCliFailure(
+    command: readonly string[]
+): Promise<FailedCommand> {
+    try {
+        await execFileAsync(process.execPath, command);
+    } catch (error) {
+        const cliError = error as ExecException & { readonly stdout?: string };
+
+        return {
+            code: typeof cliError.code === "number" ? cliError.code : undefined,
+            stdout: cliError.stdout ?? "",
+        };
+    }
+
+    throw new Error("Expected CLI command to fail.");
 }
 
 async function tempDirectory(): Promise<string> {
@@ -92,6 +118,7 @@ describe(validateMarkdown, () => {
             { cwd }
         );
 
+        expect(result.findings).not.toHaveLength(0);
         expect(result.findings).toHaveLength(1);
         expect(result.findings[0]?.reason).toContain("Must be string");
         expect(result.findings[0]?.line).toBe(3);
@@ -205,12 +232,13 @@ describe("remark plugin", () => {
             })
             .process("---\ntitle: 1\n---\n\n# Hello\n");
 
+        expect(file.messages).not.toHaveLength(0);
         expect(file.messages).toHaveLength(1);
         expect(file.messages[0]?.line).toBe(2);
     });
 });
 
-describe("CLI", () => {
+describe("command line interface", () => {
     let cwd: string;
 
     beforeEach(async () => {
@@ -245,9 +273,62 @@ describe("CLI", () => {
             ])
         ).rejects.toMatchObject({
             code: 1,
-            stdout: expect.stringContaining("\"findings\""),
+            stdout: expect.stringContaining('"findings"'),
         });
 
-        await expect(readFile(markdownPath, "utf8")).resolves.toContain("title: 1");
+        await expect(readFile(markdownPath, "utf8")).resolves.toContain(
+            "title: 1"
+        );
+    });
+
+    it("uses the persistent remote schema cache across CLI processes", async () => {
+        const remote = await createRemoteSchema({
+            properties: { title: { const: "Expected" } },
+            required: ["title"],
+            type: "object",
+        });
+        const cacheDirectory = path.join(cwd, ".cache", "schemas");
+        const markdownPath = path.join(cwd, "post.md");
+        const command = [
+            path.resolve("dist/cli.js"),
+            markdownPath,
+            "--schema",
+            remote.url,
+            "--cache-dir",
+            cacheDirectory,
+            "--format",
+            "json",
+            "--cwd",
+            cwd,
+        ];
+        let isClosed = false;
+        const closeRemote = async (): Promise<void> => {
+            if (isClosed) {
+                return;
+            }
+
+            isClosed = true;
+            await remote.close();
+        };
+
+        await writeFile(markdownPath, "---\ntitle: Actual\n---\n", "utf8");
+
+        try {
+            const firstRun = await expectCliFailure(command);
+
+            expect(firstRun.code).toBe(1);
+            expect(firstRun.stdout).toContain("Expected");
+            expect(remote.requests()).toBe(1);
+
+            await closeRemote();
+
+            const secondRun = await expectCliFailure(command);
+
+            expect(secondRun.code).toBe(1);
+            expect(secondRun.stdout).toContain('"findings"');
+            expect(remote.requests()).toBeLessThanOrEqual(1);
+        } finally {
+            await closeRemote();
+        }
     });
 });

@@ -8,18 +8,17 @@
 - Key changes:
 - Trade-offs:
 
-## Rule details (if applicable)
+## Behavior details
 
-- Rule ID(s):
 - New options/defaults:
-- Requires type checking?: Yes/No
+- Requires network access?: Yes/No
 - Diagnostic message changes:
-- Autofix/suggestion behavior:
+- Schema/cache/security behavior:
 
 ## Validation
 
 - [ ] `npm run typecheck`
 - [ ] `npm run test`
-- [ ] `npm run lint:all:fix:quiet` (or explain why not run)
-- [ ] Added/updated tests for valid/invalid/edge/fixer cases
-- [ ] Updated docs (`docs/rules/<rule-id>.md` and related tables/pages)
+- [ ] `npm run lint:all`
+- [ ] Added/updated tests for valid/invalid/edge/CLI cases
+- [ ] Updated README for user-visible behavior
