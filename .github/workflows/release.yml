@@ -109,7 +109,7 @@ jobs:
                   echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
 
             - name: "Prepare package version"
-              run: "npm version --no-git-tag-version '${{ steps.vars.outputs.version }}'"
+              run: "npm version --allow-same-version --no-git-tag-version '${{ steps.vars.outputs.version }}'"
 
             - name: "Verify"
               run: "npm run release:verify"
