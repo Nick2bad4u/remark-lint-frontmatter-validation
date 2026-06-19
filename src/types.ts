@@ -112,8 +112,10 @@ export interface ValidationResult {
     readonly findings: readonly ValidationFinding[];
 }
 
-/** Markdown-family extensions scanned by the CLI when callers do not pass
-explicit globs. */
+/**
+ * Markdown-family extensions scanned by the CLI when callers do not pass
+ * explicit globs.
+ */
 export const defaultExtensions = [
     ".markdown",
     ".md",
