@@ -90,7 +90,9 @@
         "release:check": "npm run release:verify",
         "release:verify": "npm run build && npm run lint:all && npm run coverage && npm run lint:package-check",
         "test": "npm run build && vitest run",
-        "typecheck": "tsc -p tsconfig.json --noEmit"
+        "typecheck": "tsc -p tsconfig.json --noEmit",
+        "update-actions": "npx actions-up --yes --style sha",
+        "update-deps": "npx ncu -i --install never && npm update --force && npm install --force"
     },
     "overrides": {
         "esbuild": "0.28.1"
