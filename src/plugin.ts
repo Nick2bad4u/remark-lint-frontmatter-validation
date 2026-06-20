@@ -1,7 +1,8 @@
 import type { Root } from "mdast";
+import type { Plugin } from "unified";
 import type { VFile } from "vfile";
 
-import { lintRule } from "unified-lint-rule";
+import { type Label, lintRule, type Severity } from "unified-lint-rule";
 
 import type { Settings } from "./types.js";
 
@@ -10,11 +11,25 @@ import { validateMarkdown } from "./validate.js";
 const origin = "remark-lint:frontmatter-validation";
 const url = "https://github.com/Nick2bad4u/remark-lint-frontmatter-validation";
 
+/** Configuration accepted by the frontmatter validation lint rule. */
+export type FrontmatterValidationConfig =
+    | [level: boolean | Label | Severity, option?: Settings]
+    | false
+    | Label
+    | Settings
+    | Severity;
+
+/** Unified-compatible plugin type for the frontmatter validation lint rule. */
+export type FrontmatterValidationPlugin = Plugin<
+    [config?: FrontmatterValidationConfig],
+    Root
+>;
+
 /**
  * Remark lint rule that validates leading Markdown frontmatter against JSON
  * Schema.
  */
-const remarkLintFrontmatterValidation = lintRule(
+const remarkLintFrontmatterValidation: FrontmatterValidationPlugin = lintRule(
     { origin, url },
     async (_tree: Root, file: VFile, settings: false | Settings) => {
         if (settings === false) {
