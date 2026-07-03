@@ -80,8 +80,7 @@ export interface Settings {
     readonly extensions?: readonly string[];
     /** Frontmatter syntaxes to detect. */
     readonly frontmatter?: readonly (
-        | BuiltInFrontmatterFormat
-        | FrontmatterDefinition
+        BuiltInFrontmatterFormat | FrontmatterDefinition
     )[];
     /** Remote schema resolution controls. */
     readonly remote?: RemoteSchemaOptions;

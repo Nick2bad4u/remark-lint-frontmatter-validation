@@ -212,7 +212,6 @@ async function fetchRemoteSchema(
     try {
         const response = await fetch(url, {
             credentials: "omit",
-            redirect: "follow",
             signal: controller.signal,
         });
 

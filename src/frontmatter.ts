@@ -16,6 +16,8 @@ import type {
     ValidationFinding,
 } from "./types.js";
 
+import { getErrorMessage } from "./errors.js";
+
 /** Parsed leading frontmatter and source-location helpers for schema findings. */
 export interface ExtractedFrontmatter {
     readonly data: UnknownRecord;
@@ -96,7 +98,7 @@ export function extractFrontmatter(
             startLine,
         };
     } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
+        const message = getErrorMessage(error);
 
         return {
             column: 1,

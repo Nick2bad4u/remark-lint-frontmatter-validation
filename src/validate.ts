@@ -21,6 +21,7 @@ import type {
     ValidationResult,
 } from "./types.js";
 
+import { getErrorMessage } from "./errors.js";
 import {
     type ExtractedFrontmatter,
     extractFrontmatter,
@@ -78,7 +79,7 @@ export async function validateMarkdown(
     try {
         loadedSchema = await loadSchema(schemaSource, filePath, normalized);
     } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
+        const message = getErrorMessage(error);
 
         findings.push({
             column: 1,
@@ -113,7 +114,7 @@ export async function validateMarkdown(
             }))
         );
     } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
+        const message = getErrorMessage(error);
 
         findings.push({
             column: 1,

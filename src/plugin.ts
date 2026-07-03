@@ -2,6 +2,7 @@ import type { Root } from "mdast";
 import type { Plugin } from "unified";
 import type { VFile } from "vfile";
 
+import { objectAssign } from "ts-extras";
 import { type Label, lintRule, type Severity } from "unified-lint-rule";
 
 import type { Settings } from "./types.js";
@@ -54,7 +55,7 @@ const remarkLintFrontmatterValidation: FrontmatterValidationPlugin = lintRule(
             message.name = "Markdown frontmatter validation error";
             message.note = finding.note;
             message.expected = finding.expected?.map(String);
-            Object.assign(message, { schema: finding.schema });
+            objectAssign(message, { schema: finding.schema });
         }
     }
 );

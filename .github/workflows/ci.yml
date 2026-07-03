@@ -74,10 +74,12 @@ jobs:
                   VITEST_HANGING_PROCESS_REPORTER: "true"
 
             - name: "Verify coverage artifact"
-              run: 'python -c "from pathlib import Path; assert Path(''coverage/lcov.info'').is_file(), ''coverage/lcov.info was not generated''"'
+              run: >-
+                  python -c "from pathlib import Path; assert Path('coverage/lcov.info').is_file(), 'coverage/lcov.info was not generated'"
 
             - name: "Verify JUnit artifact"
-              run: 'python -c "from pathlib import Path; assert Path(''test-report.junit.xml'').is_file(), ''test-report.junit.xml was not generated''"'
+              run: >-
+                  python -c "from pathlib import Path; assert Path('test-report.junit.xml').is_file(), 'test-report.junit.xml was not generated'"
 
             - name: "Upload test results to Codecov"
               if: "${{ !cancelled() && env.CODECOV_TOKEN != '' }}"

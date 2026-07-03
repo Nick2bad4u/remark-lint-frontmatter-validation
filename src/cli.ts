@@ -22,6 +22,7 @@ import type {
     ValidationResult,
 } from "./types.js";
 
+import { getErrorMessage } from "./errors.js";
 import { validateMarkdown } from "./validate.js";
 
 interface CliOptions {
@@ -233,7 +234,7 @@ async function main(): Promise<number> {
 
         return results.some((result) => result.findings.length > 0) ? 1 : 0;
     } catch (error) {
-        console.error(error instanceof Error ? error.message : String(error));
+        console.error(getErrorMessage(error));
         return 2;
     }
 }
@@ -257,7 +258,7 @@ function mergeSchemaSettings(
 function parseArgs(args: readonly string[]): CliOptions {
     const options = defaultCliOptions();
 
-    for (let index = 0; index < args.length; ) {
+    for (let index = 0; index < args.length;) {
         index = parseArgument(args, index, options).nextIndex;
     }
 
