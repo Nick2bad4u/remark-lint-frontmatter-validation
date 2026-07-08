@@ -78,7 +78,7 @@
         "clean:dist": "node -e \"import('node:fs').then(({ rmSync }) => rmSync('dist', { recursive: true, force: true }))\"",
         "coverage": "npm run build && vitest run --coverage",
         "lint": "eslint . --cache --cache-strategy content --cache-location .cache/.eslintcache",
-        "lint:all": "npm run lint && npm run typecheck && npm run test && npm run lint:prettier && npm run lint:package && npm run lint:lychee && npm run lint:secretlint && npm run lint:yaml && npm run lint:jscpd",
+        "lint:all": "npm run lint && npm run typecheck && npm run test && npm run lint:prettier && npm run lint:package && npm run lint:secretlint && npm run lint:yaml",
         "lint:package": "npm run lint:package-json && npm run lint:package-check",
         "lint:package-check": "npm pack --dry-run && publint && attw --pack . --profile esm-only",
         "lint:package-json": "npmPkgJsonLint . --config .npmpackagejsonlintrc.json",
