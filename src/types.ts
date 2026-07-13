@@ -19,7 +19,11 @@ export interface FrontmatterDefinition {
 /** Normalized settings with defaults applied. */
 export interface NormalizedSettings extends Omit<
     Settings,
-    "cwd" | "extensions" | "frontmatter" | "remote" | "schemaKey"
+    | "cwd"
+    | "extensions"
+    | "frontmatter"
+    | "remote"
+    | "schemaKey"
 > {
     readonly cwd: string;
     readonly extensions: readonly string[];
@@ -27,7 +31,11 @@ export interface NormalizedSettings extends Omit<
     readonly remote: Required<
         Pick<
             RemoteSchemaOptions,
-            "allowInFileUrls" | "enabled" | "maxBytes" | "refs" | "timeoutMs"
+            | "allowInFileUrls"
+            | "enabled"
+            | "maxBytes"
+            | "refs"
+            | "timeoutMs"
         >
     > & {
         readonly allowedHosts: readonly string[] | undefined;
@@ -63,7 +71,10 @@ export interface RemoteSchemaOptions {
     /** Maximum response body size in bytes. */
     readonly maxBytes?: number;
     /** Remote `$ref` behavior. */
-    readonly refs?: "all" | "same-origin" | false;
+    readonly refs?:
+        | "all"
+        | "same-origin"
+        | false;
     /** Fetch timeout in milliseconds. */
     readonly timeoutMs?: number;
 }

@@ -34,9 +34,15 @@ interface CliOptions {
     readonly cwd: string;
     readonly extensions: readonly string[] | undefined;
     readonly files: readonly string[];
-    readonly format: "github" | "json" | "stylish";
+    readonly format:
+        | "github"
+        | "json"
+        | "stylish";
     readonly frontmatter: readonly ("toml" | "yaml")[] | undefined;
-    readonly remoteRefs: "all" | "same-origin" | false;
+    readonly remoteRefs:
+        | "all"
+        | "same-origin"
+        | false;
     readonly requireFrontmatter: boolean;
     readonly requireSchema: boolean;
     readonly schema: string | undefined;

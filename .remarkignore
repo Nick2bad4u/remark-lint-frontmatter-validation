@@ -1,3 +1,5 @@
 dist
 node_modules
 coverage
+**/agent-commit-message-instructions.md
+.github/agent-commit-message-instructions.md

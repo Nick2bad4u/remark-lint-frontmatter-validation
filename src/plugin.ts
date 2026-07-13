@@ -14,7 +14,12 @@ const url = "https://github.com/Nick2bad4u/remark-lint-frontmatter-validation";
 
 /** Configuration accepted by the frontmatter validation lint rule. */
 export type FrontmatterValidationConfig =
-    | [level: boolean | Label | Severity, option?: Settings]
+    | [
+        level: | boolean
+        | Label
+        | Severity,
+        option?: Settings,
+    ]
     | false
     | Label
     | Settings
