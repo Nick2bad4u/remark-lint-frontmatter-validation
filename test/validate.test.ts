@@ -221,6 +221,13 @@ describe(validateMarkdown, () => {
 });
 
 describe("remark plugin", () => {
+    const embeddedSchema = {
+        additionalProperties: false,
+        properties: { title: { type: "string" } },
+        required: ["title"],
+        type: "object",
+    };
+
     it("validates Markdown fixture files through remark-lint", async () => {
         const schema = "./schemas/article.schema.json";
         const pluginOptions = {
@@ -315,6 +322,87 @@ describe("remark plugin", () => {
         expect(file.messages).not.toHaveLength(0);
         expect(file.messages).toHaveLength(1);
         expect(file.messages[0]?.line).toBe(2);
+    });
+
+    it("preserves ordinary Markdown when frontmatter is optional", async () => {
+        const markdown = "# Hello\n\nA paragraph with **strong text**.\n";
+        const file = await remark()
+            .use(remarkFrontmatter, ["yaml", "toml"])
+            .use(remarkLintFrontmatterValidation, { embed: embeddedSchema })
+            .process(markdown);
+
+        expect(file.messages).toStrictEqual([]);
+        expect(String(file)).toBe(markdown);
+    });
+
+    it("honors requireFrontmatter with stable remark-lint metadata", async () => {
+        const file = await remark()
+            .use(remarkFrontmatter, ["yaml", "toml"])
+            .use(remarkLintFrontmatterValidation, {
+                embed: embeddedSchema,
+                requireFrontmatter: true,
+            })
+            .process({ path: "content/missing.md", value: "# Hello\n" });
+
+        expect(file.messages).toHaveLength(1);
+        expect(file.messages[0]).toMatchObject({
+            column: 1,
+            line: 1,
+            reason: "Missing supported YAML or TOML frontmatter.",
+            ruleId: "frontmatter-validation",
+            source: "remark-lint",
+        });
+    });
+
+    it("reports malformed frontmatter without breaking the pipeline", async () => {
+        const file = await remark()
+            .use(remarkFrontmatter, ["yaml", "toml"])
+            .use(remarkLintFrontmatterValidation, { embed: embeddedSchema })
+            .process("---\ntitle: [\n---\n\n# Hello\n");
+
+        expect(file.messages).toHaveLength(1);
+        expect(file.messages[0]).toMatchObject({
+            column: 1,
+            line: 2,
+            ruleId: "frontmatter-validation",
+            source: "remark-lint",
+        });
+        expect(file.messages[0]?.reason).toContain(
+            "YAML frontmatter parsing failed"
+        );
+    });
+
+    it("reports an unclosed optional frontmatter fence", async () => {
+        const file = await remark()
+            .use(remarkFrontmatter, ["yaml", "toml"])
+            .use(remarkLintFrontmatterValidation, { embed: embeddedSchema })
+            .process("---\ntitle: Unclosed\n\n# Hello\n");
+
+        expect(file.messages).toHaveLength(1);
+        expect(file.messages[0]).toMatchObject({
+            column: 1,
+            line: 1,
+            reason: "Frontmatter fence '---' is not closed.",
+            ruleId: "frontmatter-validation",
+            source: "remark-lint",
+        });
+    });
+
+    it("reuses a composed processor without duplicate plugin findings", async () => {
+        const processor = remark()
+            .use(remarkFrontmatter, ["yaml", "toml"])
+            .use(remarkLintFrontmatterValidation, { embed: embeddedSchema })
+            .use(remarkLintFrontmatterValidation, { embed: embeddedSchema });
+        const valid = await processor.process(
+            "---\ntitle: Valid\n---\n\n# First\n"
+        );
+        const invalid = await processor.process(
+            "---\ntitle: 1\n---\n\n# Second\n"
+        );
+
+        expect(valid.messages).toStrictEqual([]);
+        expect(invalid.messages).toHaveLength(1);
+        expect(invalid.messages[0]?.ruleId).toBe("frontmatter-validation");
     });
 });
 

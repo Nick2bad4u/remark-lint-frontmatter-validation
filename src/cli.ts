@@ -27,48 +27,48 @@ import { validateMarkdown } from "./validate.js";
 
 interface CliOptions {
     readonly allowInFileUrls: boolean;
-    readonly cache: boolean | undefined;
-    readonly cacheDirectory: string | undefined;
-    readonly cacheTtlMs: number | undefined;
-    readonly config: string | undefined;
+    readonly cache?: boolean;
+    readonly cacheDirectory?: string;
+    readonly cacheTtlMs?: number;
+    readonly config?: string;
     readonly cwd: string;
-    readonly extensions: readonly string[] | undefined;
+    readonly extensions?: readonly string[];
     readonly files: readonly string[];
     readonly format:
         | "github"
         | "json"
         | "stylish";
-    readonly frontmatter: readonly ("toml" | "yaml")[] | undefined;
+    readonly frontmatter?: readonly ("toml" | "yaml")[];
     readonly remoteRefs:
         | "all"
         | "same-origin"
         | false;
     readonly requireFrontmatter: boolean;
     readonly requireSchema: boolean;
-    readonly schema: string | undefined;
-    readonly schemaKey: string | undefined;
+    readonly schema?: string;
+    readonly schemaKey?: string;
     readonly schemaMaps: readonly string[];
-    readonly timeoutMs: number | undefined;
+    readonly timeoutMs?: number;
 }
 
 interface MutableCliOptions {
     allowInFileUrls: boolean;
-    cache: boolean | undefined;
-    cacheDirectory: string | undefined;
-    cacheTtlMs: number | undefined;
-    config: string | undefined;
+    cache?: boolean;
+    cacheDirectory?: string;
+    cacheTtlMs?: number;
+    config?: string;
     cwd: string;
-    extensions: string[] | undefined;
+    extensions?: string[];
     files: string[];
     format: CliOptions["format"];
-    frontmatter: ("toml" | "yaml")[] | undefined;
+    frontmatter?: ("toml" | "yaml")[];
     remoteRefs: CliOptions["remoteRefs"];
     requireFrontmatter: boolean;
     requireSchema: boolean;
-    schema: string | undefined;
-    schemaKey: string | undefined;
+    schema?: string;
+    schemaKey?: string;
     schemaMaps: string[];
-    timeoutMs: number | undefined;
+    timeoutMs?: number;
 }
 
 interface ParsedArgument {
@@ -144,22 +144,13 @@ function buildSettings(options: CliOptions, config: Settings): Settings {
 function defaultCliOptions(): MutableCliOptions {
     return {
         allowInFileUrls: false,
-        cache: undefined,
-        cacheDirectory: undefined,
-        cacheTtlMs: undefined,
-        config: undefined,
         cwd: process.cwd(),
-        extensions: undefined,
         files: [],
         format: "stylish",
-        frontmatter: undefined,
         remoteRefs: false,
         requireFrontmatter: false,
         requireSchema: false,
-        schema: undefined,
-        schemaKey: undefined,
         schemaMaps: [],
-        timeoutMs: undefined,
     };
 }
 
@@ -533,7 +524,7 @@ function takeValue(
 ): string {
     const value = args[index + 1];
 
-    if (!isDefined(value) || value === "" || value.startsWith("--")) {
+    if (value === "" || !isDefined(value) || value.startsWith("--")) {
         throw new Error(`${flag} requires a value.`);
     }
 

@@ -141,4 +141,4 @@ export const defaultExtensions = [
 export const defaultFrontmatterDefinitions: readonly FrontmatterDefinition[] = [
     { name: "toml", open: "+++", parser: "toml" },
     { name: "yaml", open: "---", parser: "yaml" },
-] as const;
+];
