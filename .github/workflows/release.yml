@@ -66,6 +66,14 @@ jobs:
                   npm install --global npm@12.0.2 --ignore-scripts
                   npm --version
 
+            - name: "Install native lint tools"
+              run: |
+                  set -euo pipefail
+                  go install github.com/zricethezav/gitleaks/v8@83d9cd684c87d95d656c1458ef04895a7f1cbd8e
+                  echo "${HOME}/go/bin" >> "${GITHUB_PATH}"
+                  python -m pip install --user --disable-pip-version-check yamllint==1.38.0
+                  echo "${HOME}/.local/bin" >> "${GITHUB_PATH}"
+
             - name: "Install"
               run: "npm ci"
 
