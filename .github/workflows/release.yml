@@ -119,8 +119,10 @@ jobs:
                     exit 1
                   fi
 
-                  echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
-                  echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+                  {
+                    echo "tag=${TAG}"
+                    echo "version=${TAG#v}"
+                  } >> "$GITHUB_OUTPUT"
 
             - name: "Prepare package version"
               run: "npm version --allow-same-version --no-git-tag-version '${{ steps.vars.outputs.version }}'"
@@ -191,14 +193,29 @@ jobs:
             - name: "Publish npm package"
               run: "npm publish --access public --provenance"
 
+            - name: "Publish release tag"
+              env:
+                  TAG: "${{ steps.vars.outputs.tag }}"
+              run: |
+                  git push origin "refs/tags/${TAG}"
+
             - name: "Create GitHub release"
               env:
                   GH_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
                   NOTES: "${{ steps.git-cliff.outputs.changelog }}"
                   TAG: "${{ steps.vars.outputs.tag }}"
               run: |
+                  set -euo pipefail
+
+                  LOCAL_TAG_SHA="$(git rev-parse "refs/tags/${TAG}")"
+                  REMOTE_TAG_SHA="$(git ls-remote origin "refs/tags/${TAG}" | awk '{print $1}')"
+                  if [ "$REMOTE_TAG_SHA" != "$LOCAL_TAG_SHA" ]; then
+                    echo "::error::Remote tag ${TAG} is ${REMOTE_TAG_SHA:-<none>}, expected local tag object ${LOCAL_TAG_SHA}."
+                    exit 1
+                  fi
+
                   if gh release view "$TAG" >/dev/null 2>&1; then
                     gh release edit "$TAG" --notes-file "$NOTES"
                   else
-                    gh release create "$TAG" --target "$GITHUB_SHA" --title "$TAG" --notes-file "$NOTES"
+                    gh release create "$TAG" --verify-tag --title "$TAG" --notes-file "$NOTES"
                   fi
