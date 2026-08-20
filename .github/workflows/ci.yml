@@ -57,8 +57,13 @@ jobs:
                   cache: "npm"
                   cache-dependency-path: "package-lock.json"
 
+            - name: "Setup npm"
+              run: |
+                  npm install --global npm@12.0.2 --ignore-scripts
+                  test "$(npm --version)" = "12.0.2"
+
             - name: "Install dependencies"
-              run: "npm ci --force"
+              run: "npm ci"
 
             - name: "Build package"
               run: "npm run build"
@@ -67,7 +72,7 @@ jobs:
               run: "npm run typecheck"
 
             - name: "Run tests with coverage and JUnit report"
-              run: "npx vitest run --coverage --reporter=github-actions --reporter=dot --reporter=junit --outputFile=test-report.junit.xml --silent"
+              run: "npm run test:ci"
               env:
                   CI: "true"
                   MAX_THREADS: "1"
@@ -139,16 +144,21 @@ jobs:
                   cache: "npm"
                   cache-dependency-path: "package-lock.json"
 
+            - name: "Setup npm"
+              run: |
+                  npm install --global npm@12.0.2 --ignore-scripts
+                  test "$(npm --version)" = "12.0.2"
+
             - name: "Install native lint tools"
               run: |
                   set -euo pipefail
-                  go install github.com/zricethezav/gitleaks/v8@v8.30.1
+                  go install github.com/zricethezav/gitleaks/v8@83d9cd684c87d95d656c1458ef04895a7f1cbd8e
                   echo "${HOME}/go/bin" >> "${GITHUB_PATH}"
                   python -m pip install --user --disable-pip-version-check yamllint==1.38.0
                   echo "${HOME}/.local/bin" >> "${GITHUB_PATH}"
 
             - name: "Install dependencies"
-              run: "npm ci --force"
+              run: "npm ci"
 
             - name: "Run full verification pipeline"
               run: "npm run release:verify"

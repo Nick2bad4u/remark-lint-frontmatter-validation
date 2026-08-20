@@ -30,4 +30,4 @@ const plugins: PluggableList = [
 
 const preset: Preset = { plugins };
 
-void preset;
+export { preset };

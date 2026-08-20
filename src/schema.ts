@@ -107,7 +107,7 @@ function assertAllowedRemoteUrl(url: URL, settings: NormalizedSettings): void {
     const hostname: string = url.hostname;
     const allowedHostSet = new Set<string>(allowedHosts);
     const isAllowedHost = setHas(allowedHostSet, hostname);
-    if (!isEmpty(allowedHosts) && !isAllowedHost) {
+    if (!isAllowedHost && !isEmpty(allowedHosts)) {
         const rejectedUrl = new URL(url.href);
 
         throw new Error(
@@ -230,16 +230,6 @@ async function fetchRemoteSchema(
     }
 }
 
-async function fileExists(filePath: string): Promise<boolean> {
-    try {
-        const stats = await stat(filePath);
-
-        return stats.isFile();
-    } catch {
-        return false;
-    }
-}
-
 function findRemoteRefs(schema: unknown, refs: string[] = []): string[] {
     if (schema === null || typeof schema !== "object") {
         return refs;
@@ -265,6 +255,16 @@ function findRemoteRefs(schema: unknown, refs: string[] = []): string[] {
     }
 
     return refs;
+}
+
+async function isExistingFile(filePath: string): Promise<boolean> {
+    try {
+        const stats = await stat(filePath);
+
+        return stats.isFile();
+    } catch {
+        return false;
+    }
 }
 
 function isRemoteSchemaCacheEntry(
@@ -312,7 +312,7 @@ async function normalizeSchemaPath(
     }
 
     const fromMarkdown = path.resolve(path.dirname(markdownPath), source);
-    if (await fileExists(fromMarkdown)) {
+    if (await isExistingFile(fromMarkdown)) {
         return fromMarkdown;
     }
 
@@ -408,7 +408,7 @@ function remoteOrigin(value: string): string {
 function remoteSchemaCacheDirectory(settings: NormalizedSettings): string {
     const directory = settings.remote.cache.directory;
 
-    if (isDefined(directory) && directory !== "") {
+    if (directory !== "" && isDefined(directory)) {
         return path.isAbsolute(directory)
             ? directory
             : path.resolve(settings.cwd, directory);

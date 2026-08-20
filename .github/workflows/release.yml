@@ -60,6 +60,11 @@ jobs:
                   registry-url: "https://registry.npmjs.org"
                   package-manager-cache: false
 
+            - name: "Setup npm"
+              run: |
+                  npm install --global npm@12.0.2 --ignore-scripts
+                  test "$(npm --version)" = "12.0.2"
+
             - name: "Install"
               run: "npm ci"
 
