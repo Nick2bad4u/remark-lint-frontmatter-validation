@@ -61,6 +61,7 @@ jobs:
                   package-manager-cache: false
 
             - name: "Setup npm"
+              working-directory: "${{ runner.temp }}"
               run: |
                   npm install --global npm@12.0.2 --ignore-scripts
                   npm --version
