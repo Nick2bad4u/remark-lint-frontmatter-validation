@@ -372,6 +372,22 @@ describe("remark plugin", () => {
         );
     });
 
+    it("reports an unclosed optional frontmatter fence", async () => {
+        const file = await remark()
+            .use(remarkFrontmatter, ["yaml", "toml"])
+            .use(remarkLintFrontmatterValidation, { embed: embeddedSchema })
+            .process("---\ntitle: Unclosed\n\n# Hello\n");
+
+        expect(file.messages).toHaveLength(1);
+        expect(file.messages[0]).toMatchObject({
+            column: 1,
+            line: 1,
+            reason: "Frontmatter fence '---' is not closed.",
+            ruleId: "frontmatter-validation",
+            source: "remark-lint",
+        });
+    });
+
     it("reuses a composed processor without duplicate plugin findings", async () => {
         const processor = remark()
             .use(remarkFrontmatter, ["yaml", "toml"])
