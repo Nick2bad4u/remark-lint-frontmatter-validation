@@ -51,7 +51,10 @@ export async function validateMarkdown(
     const frontmatter = extractFrontmatter(markdown, normalized);
 
     if (!isExtractedFrontmatter(frontmatter)) {
-        if (normalized.requireFrontmatter) {
+        const shouldReport =
+            frontmatter.fatal === true ? true : normalized.requireFrontmatter;
+
+        if (shouldReport) {
             findings.push(frontmatter);
         }
 

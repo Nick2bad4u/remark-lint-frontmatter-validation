@@ -65,6 +65,7 @@ export function extractFrontmatter(
     if (!isDefined(closingIndex)) {
         return {
             column: 1,
+            fatal: true,
             line: 1,
             reason: `Frontmatter fence '${definition.open}' is not closed.`,
         };
@@ -102,6 +103,7 @@ export function extractFrontmatter(
 
         return {
             column: 1,
+            fatal: true,
             line: startLine,
             reason: `${definition.name.toUpperCase()} frontmatter parsing failed: ${message}`,
         };
@@ -213,6 +215,12 @@ function parseTomlFrontmatter(raw: string): ParsedTomlFrontmatter {
 function parseYamlFrontmatter(raw: string): ParsedYamlFrontmatter {
     const lineCounter = new LineCounter();
     const document = YAML.parseDocument(raw, { lineCounter });
+    const [parseError] = document.errors;
+
+    if (parseError) {
+        throw new Error(parseError.message, { cause: parseError });
+    }
+
     const parsedData: unknown = document.toJS();
     const data = isUnknownRecord(parsedData) ? parsedData : null;
 
