@@ -87,6 +87,7 @@ jobs:
                   if [ "${EVENT_NAME}" = "workflow_dispatch" ]; then
                     EXPLICIT_VERSION="${INPUT_VERSION}"
                     RELEASE_TYPE="${INPUT_RELEASE_TYPE}"
+                    mapfile -t HEAD_TAGS < <(git tag --points-at HEAD --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname)
 
                     if [ -n "${EXPLICIT_VERSION}" ]; then
                       if ! [[ "${EXPLICIT_VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
@@ -94,6 +95,12 @@ jobs:
                         exit 1
                       fi
                       NEXT_VERSION="${EXPLICIT_VERSION}"
+                    elif [ "${#HEAD_TAGS[@]}" -eq 1 ]; then
+                      TAG="${HEAD_TAGS[0]}"
+                      NEXT_VERSION="${TAG#v}"
+                    elif [ "${#HEAD_TAGS[@]}" -gt 1 ]; then
+                      echo "HEAD has multiple release tags: ${HEAD_TAGS[*]}" >&2
+                      exit 1
                     else
                       LATEST_TAG="$(git tag --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -n 1)"
                       BASE_VERSION="${LATEST_TAG#v}"
@@ -109,7 +116,7 @@ jobs:
                       esac
                       NEXT_VERSION="${MAJOR}.${MINOR}.${PATCH}"
                     fi
-                    TAG="v${NEXT_VERSION}"
+                    TAG="${TAG:-v${NEXT_VERSION}}"
                   else
                     TAG="${GITHUB_REF_NAME}"
                   fi
@@ -119,8 +126,11 @@ jobs:
                     exit 1
                   fi
 
-                  echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
-                  echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+                  {
+                    echo "tag=${TAG}"
+                    echo "version=${TAG#v}"
+                    echo "source_sha=$(git rev-parse HEAD)"
+                  } >> "$GITHUB_OUTPUT"
 
             - name: "Prepare package version"
               run: "npm version --allow-same-version --no-git-tag-version '${{ steps.vars.outputs.version }}'"
@@ -141,11 +151,16 @@ jobs:
                   fi
 
                   if git show-ref --verify --quiet "refs/tags/${EXPECTED_TAG}"; then
-                    echo "::error::Expected release tag ${EXPECTED_TAG} already exists; refusing to replace it during a manual release."
-                    exit 1
+                    tag_commit=$(git rev-parse "refs/tags/${EXPECTED_TAG}^{commit}")
+                    head_commit=$(git rev-parse HEAD)
+                    if [ "$tag_commit" != "$head_commit" ]; then
+                      echo "::error::Expected release tag ${EXPECTED_TAG} points to ${tag_commit}, but HEAD is ${head_commit}."
+                      exit 1
+                    fi
+                    echo "Reusing existing release tag ${EXPECTED_TAG} at ${head_commit}."
+                  else
+                    git tag "$EXPECTED_TAG" HEAD
                   fi
-
-                  git tag "$EXPECTED_TAG" HEAD
 
             - name: "Validate expected release tag"
               env:
@@ -189,7 +204,32 @@ jobs:
                   GITHUB_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
 
             - name: "Publish npm package"
-              run: "npm publish --access public --provenance"
+              env:
+                  EXPECTED_VERSION: "${{ steps.vars.outputs.version }}"
+                  SOURCE_SHA: "${{ steps.vars.outputs.source_sha }}"
+              run: |
+                  set -euo pipefail
+
+                  PACKAGE_NAME="$(node -p "require('./package.json').name")"
+                  VIEW_ERROR="${RUNNER_TEMP}/npm-view-error.log"
+                  if PUBLISHED_GIT_HEAD="$(npm view "${PACKAGE_NAME}@${EXPECTED_VERSION}" gitHead 2>"${VIEW_ERROR}")"; then
+                    if [ "$PUBLISHED_GIT_HEAD" != "$SOURCE_SHA" ]; then
+                      echo "::error::${PACKAGE_NAME}@${EXPECTED_VERSION} already exists with gitHead ${PUBLISHED_GIT_HEAD:-<none>}, expected ${SOURCE_SHA}."
+                      exit 1
+                    fi
+                    echo "${PACKAGE_NAME}@${EXPECTED_VERSION} is already published from ${SOURCE_SHA}; skipping npm publish."
+                  elif grep -Eq 'E404|404 Not Found' "${VIEW_ERROR}"; then
+                    npm publish --access public --provenance
+                  else
+                    cat "${VIEW_ERROR}" >&2
+                    exit 1
+                  fi
+
+            - name: "Publish release tag"
+              env:
+                  TAG: "${{ steps.vars.outputs.tag }}"
+              run: |
+                  git push origin "refs/tags/${TAG}"
 
             - name: "Create GitHub release"
               env:
@@ -197,8 +237,17 @@ jobs:
                   NOTES: "${{ steps.git-cliff.outputs.changelog }}"
                   TAG: "${{ steps.vars.outputs.tag }}"
               run: |
+                  set -euo pipefail
+
+                  LOCAL_TAG_SHA="$(git rev-parse "refs/tags/${TAG}")"
+                  REMOTE_TAG_SHA="$(git ls-remote origin "refs/tags/${TAG}" | awk '{print $1}')"
+                  if [ "$REMOTE_TAG_SHA" != "$LOCAL_TAG_SHA" ]; then
+                    echo "::error::Remote tag ${TAG} is ${REMOTE_TAG_SHA:-<none>}, expected local tag object ${LOCAL_TAG_SHA}."
+                    exit 1
+                  fi
+
                   if gh release view "$TAG" >/dev/null 2>&1; then
                     gh release edit "$TAG" --notes-file "$NOTES"
                   else
-                    gh release create "$TAG" --target "$GITHUB_SHA" --title "$TAG" --notes-file "$NOTES"
+                    gh release create "$TAG" --verify-tag --title "$TAG" --notes-file "$NOTES"
                   fi

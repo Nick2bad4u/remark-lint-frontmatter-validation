@@ -64,7 +64,7 @@
     "main": "./dist/plugin.js",
     "types": "./dist/plugin.d.ts",
     "bin": {
-        "remark-lint-frontmatter-validation": "./dist/cli.js"
+        "remark-lint-frontmatter-validation": "dist/cli.js"
     },
     "files": [
         "dist",
